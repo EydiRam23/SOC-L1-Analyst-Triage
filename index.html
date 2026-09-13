@@ -122,6 +122,11 @@
   .submitstate.ok{color:var(--ok);}
   .submitstate.bad{color:var(--warn);}
   .locked-note{font-size:12px;color:var(--muted);margin-top:6px;}
+  .field input.invalid, .field textarea.invalid, .field select.invalid{border-color:var(--crit);}
+  fieldset.invalid{border-color:var(--crit);}
+  .field label .req, fieldset legend .req{color:var(--high);}
+  .valmsg{font-size:12.5px;color:var(--crit);line-height:1.5;margin:2px 0 10px;}
+  .valmsg ul{margin:4px 0 0;padding-left:18px;}
 
   /* leaderboard */
   .stats{display:flex;gap:26px;flex-wrap:wrap;margin:0 0 16px;}
@@ -660,7 +665,7 @@ function buildField(labelText, id, type, value){
   if(type==='textarea'){ input = el('textarea'); }
   else { input = el('input'); input.type='text'; }
   input.id = id; input.value = value||'';
-  input.addEventListener('input', ()=>{ /* saved on nav */ });
+  input.addEventListener('input', ()=>{ input.classList.remove('invalid'); });
   wrap.appendChild(input);
   return wrap;
 }
@@ -736,8 +741,8 @@ function renderScenario(){
   formPanel.appendChild(buildField('Expected / benign explanation (if any)','benignExplain','textarea',r.benignExplain));
 
   // Verdict fieldset
-  const vfs = el('fieldset');
-  const vleg = el('legend'); vleg.textContent = 'L1 Verdict';
+  const vfs = el('fieldset'); vfs.id = 'fsVerdict';
+  const vleg = el('legend'); vleg.textContent = 'L1 Verdict *';
   vfs.appendChild(vleg);
   const vrow = el('div','opt-row');
   VERDICTS.forEach(v=>{
@@ -745,6 +750,7 @@ function renderScenario(){
     const inp = el('input'); inp.type='radio'; inp.name='verdict'; inp.value=v;
     if(r.verdict===v) inp.checked = true;
     if(r.checked) inp.disabled = true;
+    inp.addEventListener('change', ()=>{ vfs.classList.remove('invalid'); });
     lbl.appendChild(inp);
     lbl.appendChild(document.createTextNode(v));
     vrow.appendChild(lbl);
@@ -760,18 +766,19 @@ function renderScenario(){
   // Severity + escalation row
   const grid2b = el('div','grid2');
   const sevField = el('div','field');
-  const sevLabel = el('label'); sevLabel.textContent='Severity assessment';
+  const sevLabel = el('label'); sevLabel.textContent='Severity assessment *';
   const sevSelect = el('select'); sevSelect.id='severityAssess';
   ['','Low','Medium','High','Critical'].forEach(opt=>{
     const o = document.createElement('option'); o.value=opt; o.textContent = opt || 'Select severity';
     if(r.severityAssess===opt) o.selected = true;
     sevSelect.appendChild(o);
   });
+  sevSelect.addEventListener('change', ()=>{ sevSelect.classList.remove('invalid'); });
   sevField.appendChild(sevLabel); sevField.appendChild(sevSelect);
   grid2b.appendChild(sevField);
 
-  const efs = el('fieldset');
-  const eleg = el('legend'); eleg.textContent='Escalation Required';
+  const efs = el('fieldset'); efs.id = 'fsEscalate';
+  const eleg = el('legend'); eleg.textContent='Escalation Required *';
   efs.appendChild(eleg);
   const erow = el('div','opt-row');
   ['No','Yes'].forEach(v=>{
@@ -779,6 +786,7 @@ function renderScenario(){
     const inp = el('input'); inp.type='radio'; inp.name='escalate'; inp.value=v;
     if(r.escalate===v) inp.checked = true;
     if(r.checked) inp.disabled = true;
+    inp.addEventListener('change', ()=>{ efs.classList.remove('invalid'); });
     lbl.appendChild(inp);
     lbl.appendChild(document.createTextNode(v));
     erow.appendChild(lbl);
@@ -787,14 +795,18 @@ function renderScenario(){
   grid2b.appendChild(efs);
   formPanel.appendChild(grid2b);
 
-  formPanel.appendChild(buildField('Reason','reason','textarea',r.reason));
-  formPanel.appendChild(buildField('Recommended next action','nextAction','textarea',r.nextAction));
+  formPanel.appendChild(buildField('Reason *','reason','textarea',r.reason));
+  formPanel.appendChild(buildField('Recommended next action *','nextAction','textarea',r.nextAction));
 
   // Answer key reveal area
   const akWrap = el('div');
   akWrap.id = 'answerArea';
   if(r.checked){ akWrap.appendChild(buildAnswerKey(s,r)); }
   formPanel.appendChild(akWrap);
+
+  // Validation feedback
+  const valBox = el('div','valmsg'); valBox.id = 'valMsg';
+  formPanel.appendChild(valBox);
 
   // Buttons
   const btnrow = el('div','btnrow');
@@ -808,7 +820,9 @@ function renderScenario(){
     checkBtn.addEventListener('click', ()=>{
       saveCurrent();
       const rr = ensureResp(s.id);
-      if(!rr.verdict){ alert('Pick a verdict first, then check your answer.'); return; }
+      const problems = validateCase(rr);
+      if(problems.length){ showValidation(problems); return; }
+      clearValidation();
       rr.checked = true;
       rr.correct = computeCorrect(s.answer, rr);
       persist();
@@ -823,6 +837,11 @@ function renderScenario(){
   nextBtn.textContent = idx === SCENARIOS.length-1 ? 'Finish \u2192' : 'Next \u2192';
   nextBtn.addEventListener('click', ()=>{
     saveCurrent();
+    const rr = ensureResp(s.id);
+    if(!rr.checked){
+      const ok = confirm('This case has not been scored yet, so it will count as zero.\n\nComplete the triage record and press "Check answer & score" to score it.\n\nSkip it anyway?');
+      if(!ok) return;
+    }
     if(idx === SCENARIOS.length-1){ renderSummary(); }
     else { idx++; render(); }
   });
@@ -831,6 +850,60 @@ function renderScenario(){
 
   formPanel.appendChild(btnrow);
   view.appendChild(formPanel);
+}
+
+/* Every field an L1 must commit to before a case can be scored. */
+const MIN_NOTE = 10;   // minimum characters for the written fields
+
+function validateCase(r){
+  const problems = [];
+  if(!r.verdict){
+    problems.push({field:'fsVerdict', type:'fieldset', msg:'Choose an L1 verdict.'});
+  }
+  if(!r.severityAssess){
+    problems.push({field:'severityAssess', type:'input', msg:'Select a severity assessment.'});
+  }
+  if(!r.escalate){
+    problems.push({field:'fsEscalate', type:'fieldset', msg:'Say whether escalation is required.'});
+  }
+  if(!r.reason || r.reason.trim().length < MIN_NOTE){
+    problems.push({field:'reason', type:'input', msg:'Give a reason for your verdict (at least ' + MIN_NOTE + ' characters).'});
+  }
+  if(!r.nextAction || r.nextAction.trim().length < MIN_NOTE){
+    problems.push({field:'nextAction', type:'input', msg:'State the recommended next action (at least ' + MIN_NOTE + ' characters).'});
+  }
+  return problems;
+}
+
+function clearValidation(){
+  const box = document.getElementById('valMsg');
+  if(box) box.innerHTML = '';
+  document.querySelectorAll('.invalid').forEach(n=>n.classList.remove('invalid'));
+}
+
+function showValidation(problems){
+  clearValidation();
+  const box = document.getElementById('valMsg');
+  if(box){
+    const head = document.createElement('div');
+    head.textContent = problems.length === 1
+      ? 'One field still needs completing before this case can be scored:'
+      : problems.length + ' fields still need completing before this case can be scored:';
+    box.appendChild(head);
+    const ul = document.createElement('ul');
+    problems.forEach(p=>{ const li = document.createElement('li'); li.textContent = p.msg; ul.appendChild(li); });
+    box.appendChild(ul);
+  }
+  problems.forEach(p=>{
+    const node = document.getElementById(p.field);
+    if(node) node.classList.add('invalid');
+  });
+  const first = document.getElementById(problems[0].field);
+  if(first){
+    first.scrollIntoView({block:'center', behavior:'smooth'});
+    if(problems[0].type === 'input' && first.focus) first.focus();
+    else { const radio = first.querySelector('input'); if(radio) radio.focus(); }
+  }
 }
 
 function computeCorrect(answer, r){
