@@ -101,6 +101,49 @@
 
   .hint{font-size:12px;color:var(--muted);margin-top:2px;}
 
+  /* registration */
+  .gate{max-width:520px;margin:6vh auto 0;}
+  .gate .lead{font-size:14px;color:var(--muted);line-height:1.6;margin:0 0 18px;}
+  .gate .panel{padding:20px;}
+  .req{color:var(--high);}
+  .notice{font-size:12px;color:var(--muted);line-height:1.55;margin:12px 0 0;border-left:2px solid var(--accent-dim);padding-left:10px;}
+  .err{color:var(--crit);font-size:12.5px;margin-top:8px;min-height:16px;}
+
+  /* participant bar */
+  .whoami{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:10px;}
+  .whoami .name{color:var(--text);font-weight:600;}
+  .whoami .sid{font-family:var(--mono);}
+
+  /* score */
+  .scorebox{display:flex;align-items:baseline;gap:12px;margin:2px 0 14px;}
+  .scorebox .big{font-size:44px;font-weight:600;letter-spacing:-0.02em;line-height:1;}
+  .scorebox .of{font-size:15px;color:var(--muted);}
+  .submitstate{font-size:13px;margin-top:10px;line-height:1.5;}
+  .submitstate.ok{color:var(--ok);}
+  .submitstate.bad{color:var(--warn);}
+  .locked-note{font-size:12px;color:var(--muted);margin-top:6px;}
+
+  /* leaderboard */
+  .stats{display:flex;gap:26px;flex-wrap:wrap;margin:0 0 16px;}
+  .stat .n{font-size:26px;font-weight:600;line-height:1.1;}
+  .stat .l{font-size:11px;color:var(--muted);}
+  .lb{width:100%;border-collapse:collapse;font-size:13.5px;}
+  .lb th,.lb td{text-align:left;padding:8px;border-bottom:1px solid var(--line);}
+  .lb th{color:var(--muted);font-weight:500;font-size:11.5px;}
+  .lb td.rank{font-family:var(--mono);color:var(--muted);width:38px;}
+  .lb td.num{font-family:var(--mono);}
+  .lb tr.you{background:rgba(79,157,214,.12);}
+  .lb tr.you td.rank{color:var(--accent);}
+  .lb tr.top td.rank{color:var(--text);font-weight:600;}
+  .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;min-width:70px;}
+  .bar > span{display:block;height:100%;background:var(--accent);}
+  .bar.hard > span{background:var(--high);}
+  .empty{font-size:13.5px;color:var(--muted);line-height:1.6;}
+  .lb-foot{font-size:11.5px;color:var(--muted);margin-top:12px;}
+  .check-row{display:flex;gap:8px;align-items:flex-start;margin:2px 0 14px;font-size:13px;}
+  .check-row input{margin-top:2px;accent-color:var(--accent);}
+  .check-row label{line-height:1.45;cursor:pointer;}
+
   @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
   @media (max-width:600px){
     .meta-grid{grid-template-columns:1fr 1fr;}
@@ -110,9 +153,10 @@
 </head>
 <body>
 <div class="shell">
-  <header class="top">
+  <header class="top" id="topHeader" style="display:none;">
     <p class="eyebrow">SOC L1 TRIAGE PRACTICE</p>
     <h1>Investigation &amp; Triage Walkthrough</h1>
+    <div class="whoami" id="whoami"></div>
     <div class="case-line">
       <span class="count" id="caseCounter">Case 01 / 22</span>
       <span class="count" id="scoreCounter"></span>
@@ -120,8 +164,10 @@
     <div class="ticks" id="ticks"></div>
   </header>
 
-  <div id="scenarioView"></div>
+  <div id="registerView"></div>
+  <div id="scenarioView" style="display:none;"></div>
   <div id="summaryView" style="display:none;"></div>
+  <div id="leaderboardView" style="display:none;"></div>
 </div>
 
 <script>
@@ -487,9 +533,80 @@ Additional requests from same source: 87 similar payloads over 3 minutes, all Bl
 }
 ];
 
+/* ==========================================================================
+   CONFIG — edit these two values, nothing else.
+   --------------------------------------------------------------------------
+   SUBMIT_ENDPOINT : paste the Google Apps Script web app URL here (see
+                     SETUP_scoreboard.md). Leave it as '' to run the page in
+                     offline mode: participants still see their own score and
+                     can download a report, but nothing is sent to you.
+   REQUIRE_EMAIL   : set to false if you only want a name.
+   SHOW_LEADERBOARD: set to false to hide the public board entirely.
+   ========================================================================== */
+const SUBMIT_ENDPOINT = '';
+const REQUIRE_EMAIL = true;
+const SHOW_LEADERBOARD = true;
+
 const VERDICTS = ['False Positive','Benign Positive','True Positive','Inconclusive'];
 const responses = {};
 let idx = 0;
+let participant = null;   // {sessionId, name, email, team, displayName, listPublicly, startedAt}
+let submitState = {status:'idle', message:''};
+let board = {status:'idle', data:null, error:''};  // public leaderboard cache
+let cameFrom = 'register';                          // where "Back" returns to
+
+/* ---- storage: localStorage when available, memory otherwise ---- */
+const memStore = {};
+const store = {
+  get(k){
+    try { const v = localStorage.getItem(k); return v === null ? (k in memStore ? memStore[k] : null) : v; }
+    catch(e){ return (k in memStore) ? memStore[k] : null; }
+  },
+  set(k,v){
+    memStore[k] = v;
+    try { localStorage.setItem(k,v); } catch(e){ /* private mode / sandbox */ }
+  },
+  del(k){
+    delete memStore[k];
+    try { localStorage.removeItem(k); } catch(e){}
+  }
+};
+
+const ACTIVE_KEY = 'l1triage.active';
+function stateKey(sid){ return 'l1triage.session.' + sid; }
+
+function makeSessionId(){
+  const d = new Date();
+  const stamp = d.getFullYear().toString()
+    + String(d.getMonth()+1).padStart(2,'0')
+    + String(d.getDate()).padStart(2,'0')
+    + '-' + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0');
+  const rand = Math.random().toString(36).slice(2,6).toUpperCase();
+  return 'L1-' + stamp + '-' + rand;
+}
+
+function persist(){
+  if(!participant) return;
+  const payload = {participant:participant, responses:responses, idx:idx, submitted:submitState.status==='sent'};
+  store.set(stateKey(participant.sessionId), JSON.stringify(payload));
+  store.set(ACTIVE_KEY, participant.sessionId);
+}
+
+function restore(){
+  const sid = store.get(ACTIVE_KEY);
+  if(!sid) return false;
+  const raw = store.get(stateKey(sid));
+  if(!raw) return false;
+  try{
+    const data = JSON.parse(raw);
+    if(!data.participant || !data.participant.name) return false;
+    participant = data.participant;
+    Object.keys(data.responses||{}).forEach(k=>{ responses[k] = data.responses[k]; });
+    idx = typeof data.idx === 'number' ? data.idx : 0;
+    if(data.submitted) submitState = {status:'sent', message:'Results already submitted for this session.'};
+    return true;
+  } catch(e){ return false; }
+}
 
 function ensureResp(id){
   if(!responses[id]) responses[id] = {host:'',user:'',process:'',parentProcess:'',cmdline:'',srcip:'',dstip:'',dstport:'',whatHappened:'',evidence:'',related:'',ioc:'',benignExplain:'',verdict:'',severityAssess:'',escalate:'',reason:'',nextAction:'',checked:false,correct:null};
@@ -534,6 +651,7 @@ function saveCurrent(){
   r.verdict = vChecked ? vChecked.value : r.verdict;
   const eChecked = document.querySelector('input[name="escalate"]:checked');
   r.escalate = eChecked ? eChecked.value : r.escalate;
+  persist();
 }
 
 function buildField(labelText, id, type, value){
@@ -628,11 +746,17 @@ function renderScenario(){
     const lbl = el('label');
     const inp = el('input'); inp.type='radio'; inp.name='verdict'; inp.value=v;
     if(r.verdict===v) inp.checked = true;
+    if(r.checked) inp.disabled = true;
     lbl.appendChild(inp);
     lbl.appendChild(document.createTextNode(v));
     vrow.appendChild(lbl);
   });
   vfs.appendChild(vrow);
+  if(r.checked){
+    const ln = el('div','locked-note');
+    ln.textContent = 'Verdict locked \u2014 this case has been scored.';
+    vfs.appendChild(ln);
+  }
   formPanel.appendChild(vfs);
 
   // Severity + escalation row
@@ -656,6 +780,7 @@ function renderScenario(){
     const lbl = el('label');
     const inp = el('input'); inp.type='radio'; inp.name='escalate'; inp.value=v;
     if(r.escalate===v) inp.checked = true;
+    if(r.checked) inp.disabled = true;
     lbl.appendChild(inp);
     lbl.appendChild(document.createTextNode(v));
     erow.appendChild(lbl);
@@ -680,16 +805,19 @@ function renderScenario(){
   prevBtn.addEventListener('click', ()=>{ saveCurrent(); idx=Math.max(0,idx-1); render(); });
   leftGroup.appendChild(prevBtn);
 
-  const checkBtn = el('button','primary'); checkBtn.textContent='Check answer';
-  checkBtn.addEventListener('click', ()=>{
-    saveCurrent();
-    const rr = ensureResp(s.id);
-    if(!rr.verdict){ alert('Pick a verdict first, then check your answer.'); return; }
-    rr.checked = true;
-    rr.correct = computeCorrect(s.answer, rr);
-    render();
-  });
-  leftGroup.appendChild(checkBtn);
+  if(!r.checked){
+    const checkBtn = el('button','primary'); checkBtn.textContent='Check answer & score';
+    checkBtn.addEventListener('click', ()=>{
+      saveCurrent();
+      const rr = ensureResp(s.id);
+      if(!rr.verdict){ alert('Pick a verdict first, then check your answer.'); return; }
+      rr.checked = true;
+      rr.correct = computeCorrect(s.answer, rr);
+      persist();
+      render();
+    });
+    leftGroup.appendChild(checkBtn);
+  }
   btnrow.appendChild(leftGroup);
 
   const rightGroup = el('div','right-group');
@@ -733,6 +861,7 @@ function buildAnswerKey(s,r){
 
 function renderSummary(){
   document.getElementById('scenarioView').style.display = 'none';
+  document.getElementById('leaderboardView').style.display = 'none';
   const view = document.getElementById('summaryView');
   view.style.display = 'block';
   view.innerHTML = '';
@@ -747,11 +876,20 @@ function renderSummary(){
   panel.appendChild(h);
 
   const answeredCount = Object.values(responses).filter(x=>x.verdict).length;
+
+  const scorebox = el('div','scorebox');
+  const big = el('div','big'); big.textContent = correctCount + '/' + SCENARIOS.length;
+  const of = el('div','of');
+  of.textContent = Math.round((correctCount/SCENARIOS.length)*100) + '% \u00b7 ' + checkedCount + ' cases scored, ' + (SCENARIOS.length - checkedCount) + ' left unscored';
+  scorebox.appendChild(big); scorebox.appendChild(of);
+  panel.appendChild(scorebox);
+
   const summaryLine = el('p');
   summaryLine.style.margin = '0 0 4px';
-  summaryLine.style.fontSize = '14px';
-  summaryLine.textContent = answeredCount + ' of ' + SCENARIOS.length + ' cases given a verdict. ' +
-    (checkedCount ? (correctCount + ' of ' + checkedCount + ' checked answers matched the expected classification.') : 'No answers checked yet.');
+  summaryLine.style.fontSize = '13.5px';
+  summaryLine.style.color = 'var(--muted)';
+  summaryLine.textContent = answeredCount + ' of ' + SCENARIOS.length + ' cases were given a verdict. ' +
+    'A case only counts toward the score once you press "Check answer & score" on it.';
   panel.appendChild(summaryLine);
 
   const table = el('table','summary-table');
@@ -781,10 +919,19 @@ function renderSummary(){
   const backBtn = el('button'); backBtn.textContent = '\u2190 Review cases';
   backBtn.addEventListener('click', ()=>{ idx=0; render(); });
   leftGroup.appendChild(backBtn);
-  const restartBtn = el('button'); restartBtn.textContent = 'Restart practice';
+  if(SUBMIT_ENDPOINT && SHOW_LEADERBOARD){
+    const lbBtn = el('button'); lbBtn.textContent = 'Leaderboard';
+    lbBtn.addEventListener('click', ()=>{ cameFrom='summary'; renderLeaderboard(); loadLeaderboard(); });
+    leftGroup.appendChild(lbBtn);
+  }
+  const restartBtn = el('button'); restartBtn.textContent = 'Start a new session';
   restartBtn.addEventListener('click', ()=>{
-    if(confirm('This clears all your answers. Continue?')){
+    if(confirm('This clears all your answers and returns to the sign-in screen. Continue?')){
+      if(participant) store.del(stateKey(participant.sessionId));
+      store.del(ACTIVE_KEY);
       Object.keys(responses).forEach(k=>delete responses[k]);
+      participant = null;
+      submitState = {status:'idle', message:''};
       idx = 0;
       render();
     }
@@ -793,18 +940,110 @@ function renderSummary(){
   btnrow.appendChild(leftGroup);
 
   const rightGroup = el('div','right-group');
-  const exportBtn = el('button','primary'); exportBtn.textContent = 'Export my triage report';
+  const exportBtn = el('button'); exportBtn.textContent = 'Download my report';
   exportBtn.addEventListener('click', exportReport);
   rightGroup.appendChild(exportBtn);
-  btnrow.appendChild(rightGroup);
 
+  if(SUBMIT_ENDPOINT){
+    const submitBtn = el('button','primary');
+    submitBtn.id = 'submitBtn';
+    submitBtn.textContent = submitState.status === 'sent' ? 'Results submitted' : 'Submit results';
+    submitBtn.disabled = submitState.status === 'sent' || submitState.status === 'sending';
+    submitBtn.addEventListener('click', submitResults);
+    rightGroup.appendChild(submitBtn);
+  }
+  btnrow.appendChild(rightGroup);
   panel.appendChild(btnrow);
+
+  const state = el('div','submitstate');
+  state.id = 'submitState';
+  if(submitState.message){
+    state.textContent = submitState.message;
+    state.classList.add(submitState.status === 'sent' ? 'ok' : (submitState.status === 'error' ? 'bad' : ''));
+  } else if(SUBMIT_ENDPOINT){
+    state.style.color = 'var(--muted)';
+    state.textContent = 'Submitting sends your name, ID, session ID and score to the training administrator.';
+  }
+  panel.appendChild(state);
+
   view.appendChild(panel);
 }
 
+function buildPayload(){
+  const checked = Object.values(responses).filter(x=>x.checked);
+  const correct = checked.filter(x=>x.correct).length;
+  const finishedAt = new Date().toISOString();
+  const started = participant.startedAt ? new Date(participant.startedAt) : null;
+  const minutes = started ? Math.round((new Date(finishedAt) - started)/60000) : null;
+  return {
+    sessionId: participant.sessionId,
+    name: participant.name,
+    email: participant.email,
+    team: participant.team,
+    displayName: participant.displayName || participant.name,
+    listPublicly: !!participant.listPublicly,
+    startedAt: participant.startedAt,
+    finishedAt: finishedAt,
+    durationMinutes: minutes,
+    totalCases: SCENARIOS.length,
+    scoredCases: checked.length,
+    correct: correct,
+    scorePercent: Math.round((correct/SCENARIOS.length)*100),
+    userAgent: navigator.userAgent,
+    cases: SCENARIOS.map(s=>{
+      const r = responses[s.id] || {};
+      return {
+        id: s.id,
+        title: s.title,
+        verdict: r.verdict || '',
+        expected: s.answer.verdict,
+        escalate: r.escalate || '',
+        severity: r.severityAssess || '',
+        scored: !!r.checked,
+        correct: r.checked ? !!r.correct : null,
+        whatHappened: r.whatHappened || '',
+        reason: r.reason || '',
+        nextAction: r.nextAction || ''
+      };
+    })
+  };
+}
+
+async function submitResults(){
+  if(!SUBMIT_ENDPOINT || !participant) return;
+  submitState = {status:'sending', message:'Sending your results\u2026'};
+  renderSummary();
+  try{
+    const res = await fetch(SUBMIT_ENDPOINT, {
+      method:'POST',
+      // text/plain keeps this a "simple" request, so the browser skips the
+      // CORS preflight that Apps Script web apps cannot answer.
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify(buildPayload())
+    });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    submitState = {status:'sent', message:'Results submitted. Your session ID is ' + participant.sessionId + ' \u2014 quote it if you need your score looked up.'};
+    persist();
+    if(SHOW_LEADERBOARD){ board = {status:'idle', data:null, error:''}; }
+  } catch(err){
+    submitState = {status:'error', message:'Could not send results (' + err.message + '). Download your report and send it to the training administrator instead.'};
+  }
+  renderSummary();
+}
+
 function exportReport(){
+  const checked = Object.values(responses).filter(x=>x.checked);
+  const correct = checked.filter(x=>x.correct).length;
   let out = 'L1 SOC INVESTIGATION & TRIAGE PRACTICE - EXPORTED REPORT\n';
   out += 'Generated: ' + new Date().toISOString() + '\n';
+  if(participant){
+    out += 'Participant: ' + participant.name + '\n';
+    out += 'ID/Email: ' + (participant.email||'') + '\n';
+    out += 'Team: ' + (participant.team||'') + '\n';
+    out += 'Session ID: ' + participant.sessionId + '\n';
+    out += 'Started: ' + participant.startedAt + '\n';
+  }
+  out += 'Score: ' + correct + '/' + SCENARIOS.length + ' (' + Math.round((correct/SCENARIOS.length)*100) + '%), ' + checked.length + ' cases scored\n';
   out += '='.repeat(60) + '\n\n';
   SCENARIOS.forEach(s=>{
     const r = responses[s.id] || {};
@@ -837,16 +1076,292 @@ function exportReport(){
   const blob = new Blob([out], {type:'text/plain'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'l1-soc-triage-practice-report.txt';
+  a.href = url;
+  a.download = 'l1-triage-' + (participant ? participant.sessionId : 'report') + '.txt';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
-function render(){
-  if(idx >= SCENARIOS.length){ renderSummary(); return; }
-  renderScenario();
+function renderRegister(){
+  document.getElementById('topHeader').style.display = 'none';
+  document.getElementById('scenarioView').style.display = 'none';
+  document.getElementById('summaryView').style.display = 'none';
+  const view = document.getElementById('registerView');
+  view.style.display = 'block';
+  view.innerHTML = '';
+
+  const gate = el('div','gate');
+  const eyebrow = el('p','eyebrow'); eyebrow.textContent = 'SOC L1 TRIAGE PRACTICE';
+  const h1 = document.createElement('h1'); h1.textContent = 'Sign in to start';
+  const lead = el('p','lead');
+  lead.textContent = SCENARIOS.length + ' alert cases. For each one you review the raw log, fill in a triage record, and commit to a verdict. Your verdict locks once you check it against the expected classification, and your score is totalled at the end.';
+  gate.appendChild(eyebrow); gate.appendChild(h1); gate.appendChild(lead);
+
+  const panel = el('div','panel');
+
+  const nameField = buildField('Full name *','regName','text','');
+  const emailField = buildField('Email or employee/student ID' + (REQUIRE_EMAIL ? ' *' : ''),'regEmail','text','');
+  const teamField = buildField('Team or organization (optional)','regTeam','text','');
+  panel.appendChild(nameField);
+  panel.appendChild(emailField);
+  panel.appendChild(teamField);
+
+  if(SUBMIT_ENDPOINT && SHOW_LEADERBOARD){
+    panel.appendChild(buildField('Leaderboard display name (optional \u2014 defaults to your full name)','regDisplay','text',''));
+    const cr = el('div','check-row');
+    const cb = el('input'); cb.type='checkbox'; cb.id='regPublic'; cb.checked = true;
+    const cl = el('label'); cl.setAttribute('for','regPublic');
+    cl.textContent = 'List me on the public leaderboard. Untick to stay off it \u2014 your score is still recorded for the training administrator, just shown as anonymous to other analysts.';
+    cr.appendChild(cb); cr.appendChild(cl);
+    panel.appendChild(cr);
+  }
+
+  const errEl = el('div','err'); errEl.id = 'regError';
+  panel.appendChild(errEl);
+
+  const notice = el('p','notice');
+  notice.textContent = SUBMIT_ENDPOINT
+    ? 'When you finish, your name, ID, session ID, completion time and score are sent to the training administrator. Nothing is collected until you press Submit results on the final screen.'
+    : 'This page is running in offline mode. Your score stays in this browser only \u2014 you can download your own report at the end.';
+  panel.appendChild(notice);
+
+  const btnrow = el('div','btnrow');
+  const left = el('div','left-group');
+  if(SUBMIT_ENDPOINT && SHOW_LEADERBOARD){
+    const lbBtn = el('button'); lbBtn.textContent = 'View leaderboard';
+    lbBtn.addEventListener('click', ()=>{ cameFrom='register'; renderLeaderboard(); loadLeaderboard(); });
+    left.appendChild(lbBtn);
+  }
+  const right = el('div','right-group');
+  const startBtn = el('button','primary'); startBtn.textContent = 'Start practice';
+  startBtn.addEventListener('click', beginSession);
+  right.appendChild(startBtn);
+  btnrow.appendChild(left);
+  btnrow.appendChild(right);
+  panel.appendChild(btnrow);
+
+  gate.appendChild(panel);
+  view.appendChild(gate);
+
+  document.getElementById('regName').addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
+  document.getElementById('regEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
+  document.getElementById('regName').focus();
 }
 
+function beginSession(){
+  const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const team = document.getElementById('regTeam').value.trim();
+  const errEl = document.getElementById('regError');
+  if(name.length < 2){ errEl.textContent = 'Enter your full name to continue.'; document.getElementById('regName').focus(); return; }
+  if(REQUIRE_EMAIL && email.length < 3){ errEl.textContent = 'Enter your email or ID so your score can be matched to you.'; document.getElementById('regEmail').focus(); return; }
+  errEl.textContent = '';
+  const dispNode = document.getElementById('regDisplay');
+  const pubNode = document.getElementById('regPublic');
+  participant = {
+    sessionId: makeSessionId(),
+    name: name,
+    email: email,
+    team: team,
+    displayName: (dispNode && dispNode.value.trim()) ? dispNode.value.trim() : name,
+    listPublicly: pubNode ? pubNode.checked : false,
+    startedAt: new Date().toISOString()
+  };
+  idx = 0;
+  persist();
+  render();
+}
+
+function renderWhoami(){
+  const bar = document.getElementById('whoami');
+  bar.innerHTML = '';
+  if(!participant) return;
+  const n = el('span','name'); n.textContent = participant.name;
+  bar.appendChild(n);
+  if(participant.team){ const t = el('span'); t.textContent = participant.team; bar.appendChild(t); }
+  const s = el('span','sid'); s.textContent = participant.sessionId;
+  bar.appendChild(s);
+}
+
+/* ======================= PUBLIC LEADERBOARD ======================= */
+
+function loadLeaderboard(force){
+  if(!SUBMIT_ENDPOINT || !SHOW_LEADERBOARD) return;
+  if(board.status === 'loading') return;
+  if(board.status === 'ready' && !force) return;
+  board = {status:'loading', data:null, error:''};
+  renderLeaderboard();
+
+  const url = SUBMIT_ENDPOINT + (SUBMIT_ENDPOINT.indexOf('?') > -1 ? '&' : '?') + 'mode=leaderboard&t=' + Date.now();
+
+  fetch(url)
+    .then(res => { if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+    .then(data => { board = {status:'ready', data:data, error:''}; renderLeaderboard(); })
+    .catch(() => jsonpLeaderboard(url));   // Apps Script + CORS fallback
+}
+
+/* Apps Script sometimes refuses cross-origin fetch; JSONP always works. */
+function jsonpLeaderboard(url){
+  const cbName = 'lbcb_' + Math.random().toString(36).slice(2,8);
+  const script = document.createElement('script');
+  const done = (data)=>{
+    delete window[cbName];
+    if(script.parentNode) script.parentNode.removeChild(script);
+    if(data){ board = {status:'ready', data:data, error:''}; }
+    else { board = {status:'error', data:null, error:'Could not load the leaderboard right now.'}; }
+    renderLeaderboard();
+  };
+  window[cbName] = done;
+  script.src = url + '&callback=' + cbName;
+  script.onerror = ()=> done(null);
+  document.body.appendChild(script);
+  setTimeout(()=>{ if(window[cbName]) done(null); }, 12000);
+}
+
+function fmtMinutes(m){
+  if(m === null || m === undefined || m === '') return '\u2014';
+  return m < 60 ? (m + 'm') : (Math.floor(m/60) + 'h ' + (m%60) + 'm');
+}
+
+function renderLeaderboard(){
+  document.getElementById('registerView').style.display = 'none';
+  document.getElementById('scenarioView').style.display = 'none';
+  document.getElementById('summaryView').style.display = 'none';
+  document.getElementById('topHeader').style.display = participant ? 'block' : 'none';
+  const view = document.getElementById('leaderboardView');
+  view.style.display = 'block';
+  view.innerHTML = '';
+
+  const panel = el('div','panel');
+  const h = el('h2'); h.textContent = 'LEADERBOARD';
+  panel.appendChild(h);
+
+  if(board.status === 'loading'){
+    const p = el('p','empty'); p.textContent = 'Loading scores\u2026';
+    panel.appendChild(p);
+  } else if(board.status === 'error'){
+    const p = el('p','empty'); p.textContent = board.error;
+    panel.appendChild(p);
+  } else if(board.status === 'ready'){
+    const d = board.data || {};
+    const entries = d.entries || [];
+
+    const stats = el('div','stats');
+    [[d.participants || 0,'analysts completed'],
+     [(d.averagePercent || 0) + '%','average score'],
+     [entries.length ? (entries[0].score + '/' + entries[0].total) : '\u2014','top score']
+    ].forEach(([n,l])=>{
+      const s = el('div','stat');
+      const nn = el('div','n'); nn.textContent = n;
+      const ll = el('div','l'); ll.textContent = l;
+      s.appendChild(nn); s.appendChild(ll); stats.appendChild(s);
+    });
+    panel.appendChild(stats);
+
+    if(!entries.length){
+      const p = el('p','empty');
+      p.textContent = 'No scores posted yet. Finish the practice and submit your results to open the board.';
+      panel.appendChild(p);
+    } else {
+      const table = el('table','lb');
+      const thead = document.createElement('thead');
+      const hr = document.createElement('tr');
+      ['#','Analyst','Team','Score','Accuracy','Time'].forEach(t=>{
+        const th = document.createElement('th'); th.textContent = t; hr.appendChild(th);
+      });
+      thead.appendChild(hr); table.appendChild(thead);
+      const tb = document.createElement('tbody');
+      entries.forEach(en=>{
+        const tr = document.createElement('tr');
+        if(participant && en.sessionId === participant.sessionId) tr.classList.add('you');
+        if(en.rank <= 3) tr.classList.add('top');
+        const c1 = document.createElement('td'); c1.className='rank'; c1.textContent = en.rank;
+        const c2 = document.createElement('td');
+        c2.textContent = en.name + ((participant && en.sessionId === participant.sessionId) ? '  (you)' : '');
+        const c3 = document.createElement('td'); c3.textContent = en.team || '\u2014';
+        const c4 = document.createElement('td'); c4.className='num'; c4.textContent = en.score + '/' + en.total;
+        const c5 = document.createElement('td');
+        const bar = el('div','bar'); const fill = document.createElement('span');
+        fill.style.width = Math.max(2, en.percent) + '%'; bar.appendChild(fill);
+        c5.appendChild(bar);
+        const c6 = document.createElement('td'); c6.className='num'; c6.textContent = fmtMinutes(en.minutes);
+        [c1,c2,c3,c4,c5,c6].forEach(c=>tr.appendChild(c));
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);
+      panel.appendChild(table);
+
+      const foot = el('p','lb-foot');
+      foot.textContent = 'Ranked by score, then by completion time. Analysts who opted out are counted in the totals but not listed. Refreshes about once a minute.';
+      panel.appendChild(foot);
+    }
+
+    // Which cases the group gets wrong most often
+    const cs = (d.caseStats || []).filter(c=>c.attempts > 0).slice(0,6);
+    if(cs.length){
+      const h2 = el('h2'); h2.style.marginTop = '24px';
+      h2.textContent = 'MOST-MISSED CASES';
+      panel.appendChild(h2);
+      const t2 = el('table','lb');
+      const th2 = document.createElement('thead');
+      const hr2 = document.createElement('tr');
+      ['Alert','Case','Correct','Attempts'].forEach(t=>{
+        const th = document.createElement('th'); th.textContent = t; hr2.appendChild(th);
+      });
+      th2.appendChild(hr2); t2.appendChild(th2);
+      const tb2 = document.createElement('tbody');
+      cs.forEach(c=>{
+        const tr = document.createElement('tr');
+        const a = document.createElement('td'); a.className='num'; a.textContent = c.id;
+        const b = document.createElement('td'); b.textContent = c.title;
+        const cc = document.createElement('td');
+        const bar = el('div','bar'); if(c.percent < 60) bar.classList.add('hard');
+        const fill = document.createElement('span'); fill.style.width = Math.max(2,c.percent) + '%';
+        bar.appendChild(fill);
+        const pct = el('span'); pct.style.fontSize='11.5px'; pct.style.color='var(--muted)';
+        pct.textContent = ' ' + c.percent + '%';
+        cc.appendChild(bar); cc.appendChild(pct);
+        const dd = document.createElement('td'); dd.className='num'; dd.textContent = c.attempts;
+        [a,b,cc,dd].forEach(x=>tr.appendChild(x));
+        tb2.appendChild(tr);
+      });
+      t2.appendChild(tb2);
+      panel.appendChild(t2);
+    }
+  }
+
+  const btnrow = el('div','btnrow');
+  const left = el('div','left-group');
+  const backBtn = el('button');
+  backBtn.textContent = cameFrom === 'summary' ? '\u2190 Back to my results' : '\u2190 Back to sign-in';
+  backBtn.addEventListener('click', ()=>{
+    document.getElementById('leaderboardView').style.display = 'none';
+    if(cameFrom === 'summary'){ renderSummary(); }
+    else { renderRegister(); }
+  });
+  left.appendChild(backBtn);
+  const refreshBtn = el('button'); refreshBtn.textContent = 'Refresh';
+  refreshBtn.addEventListener('click', ()=> loadLeaderboard(true));
+  left.appendChild(refreshBtn);
+  btnrow.appendChild(left);
+  btnrow.appendChild(el('div','right-group'));
+  panel.appendChild(btnrow);
+
+  view.appendChild(panel);
+}
+
+function render(){
+  if(!participant){ renderRegister(); return; }
+  document.getElementById('registerView').style.display = 'none';
+  document.getElementById('leaderboardView').style.display = 'none';
+  document.getElementById('topHeader').style.display = 'block';
+  renderWhoami();
+  if(idx >= SCENARIOS.length){ renderSummary(); return; }
+  renderScenario();
+  persist();
+}
+
+restore();
 render();
 </script>
 </body>
