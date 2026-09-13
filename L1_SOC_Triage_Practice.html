@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L1 SOC Investigation &amp; Triage Practice</title>
+<style>
+  :root{
+    --bg:#10161d;
+    --panel:#161e27;
+    --panel-2:#1b2530;
+    --line:#28323d;
+    --text:#e6ecf2;
+    --muted:#8b98a8;
+    --accent:#4f9dd6;
+    --accent-dim:#2c4f68;
+    --ok:#4f9d7d;
+    --warn:#d99a4e;
+    --high:#e2703a;
+    --crit:#d1453b;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  body{padding:28px 16px 60px;}
+  .shell{max-width:960px;margin:0 auto;}
+
+  header.top{margin-bottom:18px;}
+  .eyebrow{font-size:12px;letter-spacing:.04em;color:var(--muted);margin:0 0 4px;}
+  h1{font-size:21px;margin:0 0 4px;font-weight:600;letter-spacing:-0.01em;}
+  .case-line{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .case-line .count{color:var(--muted);font-size:13px;font-family:var(--mono);}
+
+  .ticks{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:22px;}
+  .tick{width:16px;height:8px;border-radius:2px;background:var(--line);cursor:pointer;transition:transform .12s;}
+  .tick:hover{transform:scaleY(1.4);}
+  .tick.current{background:var(--accent);}
+  .tick.answered{background:#3a4756;}
+  .tick.correct{background:var(--ok);}
+  .tick.incorrect{background:var(--crit);}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px 18px;margin-bottom:14px;}
+  .panel h2{font-size:13px;margin:0 0 12px;color:var(--muted);font-weight:600;letter-spacing:.02em;}
+
+  .meta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px 18px;}
+  .meta-item{font-size:13px;}
+  .meta-item .k{color:var(--muted);font-size:11px;display:block;}
+  .meta-item .v{font-family:var(--mono);}
+  .sev-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-family:var(--mono);font-weight:600;}
+  .sev-Low{background:#39424c;color:var(--text);}
+  .sev-Medium{background:var(--warn);color:#20150a;}
+  .sev-High{background:var(--high);color:#1a0a04;}
+  .sev-Critical{background:var(--crit);color:#1a0505;}
+
+  .titlebar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:2px;}
+  .scen-title{font-size:16px;font-weight:600;}
+
+  pre.logblock{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:0 0 10px;}
+  pre.logblock:last-child{margin-bottom:0;}
+
+  details.checklist{margin-top:2px;}
+  details.checklist summary{cursor:pointer;color:var(--accent);font-size:13px;user-select:none;}
+  details.checklist ul{margin:10px 0 0;padding-left:20px;font-size:13px;color:var(--text);line-height:1.6;}
+
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;}
+  .field input[type=text], .field textarea, .field select{
+    width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
+    color:var(--text);font-family:var(--sans);font-size:13.5px;padding:8px 10px;
+  }
+  .field textarea{resize:vertical;min-height:52px;line-height:1.4;}
+  .field input:focus, .field textarea:focus, .field select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:0 16px;}
+
+  fieldset{border:1px solid var(--line);border-radius:5px;padding:10px 12px 12px;margin:0 0 14px;}
+  fieldset legend{font-size:12px;color:var(--muted);padding:0 4px;}
+  .opt-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:4px;}
+  .opt-row label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;}
+  .opt-row input{accent-color:var(--accent);}
+
+  .btnrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;}
+  .btnrow .left-group, .btnrow .right-group{display:flex;gap:8px;flex-wrap:wrap;}
+  button{font-family:var(--sans);font-size:13.5px;padding:9px 16px;border-radius:4px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);cursor:pointer;}
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08131c;font-weight:600;}
+  button.primary:hover{opacity:.92;}
+  button:disabled{opacity:.4;cursor:default;}
+  button:disabled:hover{border-color:var(--line);}
+
+  .answerkey{margin-top:10px;padding:12px 14px;border-radius:5px;border:1px solid var(--line);background:var(--panel-2);font-size:13.5px;line-height:1.55;}
+  .answerkey .verdict-line{display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+  .pill{font-family:var(--mono);font-size:12px;padding:2px 8px;border-radius:3px;background:#243040;}
+  .pill.correct{background:var(--ok);color:#062017;}
+  .pill.incorrect{background:var(--crit);color:#210606;}
+  .pill.neutral{background:#3a4756;}
+
+  .summary-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;}
+  .summary-table th, .summary-table td{text-align:left;border-bottom:1px solid var(--line);padding:7px 8px;}
+  .summary-table th{color:var(--muted);font-weight:500;font-size:12px;}
+
+  .hint{font-size:12px;color:var(--muted);margin-top:2px;}
+
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+  @media (max-width:600px){
+    .meta-grid{grid-template-columns:1fr 1fr;}
+    .grid2{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <p class="eyebrow">SOC L1 TRIAGE PRACTICE</p>
+    <h1>Investigation &amp; Triage Walkthrough</h1>
+    <div class="case-line">
+      <span class="count" id="caseCounter">Case 01 / 22</span>
+      <span class="count" id="scoreCounter"></span>
+    </div>
+    <div class="ticks" id="ticks"></div>
+  </header>
+
+  <div id="scenarioView"></div>
+  <div id="summaryView" style="display:none;"></div>
+</div>
+
+<script>
+const SCENARIOS = [
+{
+  id:'ALT-2026-0001', title:'Failed Windows Logon',
+  meta:{Ticket:'INC-2026-0001', Source:'Trend Micro / SIEM', Rule:'Multiple Windows Logon Failures', Severity:'Medium', Priority:'P3', Status:'Open', Asset:'XXX-ADMIN-01', User:'mis-admin', MITRE:'T1110 - Brute Force'},
+  logs:[`LogType: detection
+pname: Server & Workload Protection
+endpointHostName: XXX-ADMIN-01
+endpointIp: 10.6.120.1
+
+winEventId: 4625
+eventId: 100116
+eventName: LOG_INSPECTION_EVENT
+ruleName: Microsoft Windows Events
+
+duser: xxxxdomain.xxx.xx/mis-admin
+filePath: Security
+
+Logon Type: 3
+Status: 0xc000006d
+Sub Status: 0xc0000064
+Logon Process: NtLmSsp
+Authentication Package: NTLM
+
+subRuleName: ATTACK T1110: Multiple Windows Logon Failures
+rt: 2026-06-11T16:36:50Z`],
+  checklist:['How many 4625 events occurred, and over what time window?','Are the failures from one source IP or multiple sources?','Did a 4624 successful logon follow the failures?','Is mis-admin a legitimate administrative account for this host?','Is this during an expected maintenance window?','Are other hosts being targeted by the same source?'],
+  answer:{verdict:'Inconclusive', escalate:'conditional', rationale:'A single 4625 event does not establish an attack on its own. Pull the full failure count and source diversity: many failures across accounts/hosts with no success \u2192 escalate as a suspected credential attack; one expected failure during known administration \u2192 benign positive; an isolated, unexplained failure \u2192 monitor rather than close outright.'}
+},
+{
+  id:'ALT-2026-0002', title:'Encoded PowerShell',
+  meta:{Ticket:'INC-2026-0002', Source:'SIEM / Sysmon / PowerShell', Rule:'Suspicious Encoded PowerShell', Severity:'High', Priority:'P2', Status:'Open', Asset:'FIN-WKS-0231', User:'j.delacruz', MITRE:'T1059.001'},
+  logs:[`[Sysmon EventID 1]
+Timestamp: 2026-07-10 08:14:00
+Computer: FIN-WKS-0231
+User: j.delacruz
+Image: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe
+ParentImage: C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE
+CommandLine: powershell.exe -ExecutionPolicy Bypass -EncodedCommand <BASE64_DATA>
+ProcessId: 4412
+ParentProcessId: 3320`,
+`[PowerShell EventID 4104]
+Timestamp: 2026-07-10 08:15:12
+Host: FIN-WKS-0231
+User: j.delacruz
+ScriptBlock: Base64-decoded command downloads remote payload
+Destination: update-cdn-sync[.]com`],
+  checklist:['Was Outlook recently processing an email?','What was the decoded PowerShell command?','What URL/domain was contacted?','Was a file created?','What is the downloaded file hash?','Did the process execute another child process?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'Outlook spawning PowerShell with an encoded command and execution-policy bypass, resolving a remote download destination, is a well-formed initial-access-to-execution chain. Escalate to L2 for payload retrieval, hash lookup, and network-wide IOC sweep of update-cdn-sync[.]com.'}
+},
+{
+  id:'ALT-2026-0003', title:'Malicious PowerShell / Network Activity',
+  meta:{Source:'SIEM / Firewall', Rule:'Suspicious Outbound Connection', Severity:'High', Asset:'FIN-WKS-0231', Process:'powershell.exe', MITRE:'T1071.001'},
+  logs:[`Timestamp: 2026-07-10 08:16:03
+Source Host: FIN-WKS-0231
+Source IP: 10.10.23.45
+Destination IP: 185.220.x.x
+Destination Port: 443
+Protocol: TCP
+Action: Allowed
+Bytes Out: 18241
+Bytes In: 94722
+Application: powershell.exe`],
+  checklist:['Was the connection created immediately after PowerShell execution?','Is the destination known or suspicious?','Was there DNS resolution before the connection?','Did the same destination appear on other hosts?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'This connection correlates directly with the encoded-PowerShell alert on the same host seconds earlier. PowerShell + encoded command + an immediate outbound connection to an unresolved/suspicious IP is a strong compound True Positive indicator. Escalate to L2 alongside ALT-2026-0002.'}
+},
+{
+  id:'ALT-2026-0004', title:'Windows Service Persistence',
+  meta:{Source:'Windows Event Logs', Rule:'Suspicious Service Creation', Severity:'High', Asset:'XXX-ADMIN-01', User:'mis-admin', MITRE:'T1543.003'},
+  logs:[`Event ID: 7045
+Provider: Service Control Manager
+Service Name: mXJLFJZH
+Service File Name: %COMSPEC% /Q /c echo cd > \\\\%COMPUTERNAME%\\C$\\__output_fGSWJnuB 2>&1 > %SYSTEMROOT%\\kbMNhiIZ.bat & %COMSPEC% /Q /c %SYSTEMROOT%\\kbMNhiIZ.bat & del %SYSTEMROOT%\\kbMNhiIZ.bat
+Service Type: User mode service
+Start Type: Demand Start
+Service Account: LocalSystem
+Timestamp: 2026-06-11 16:40:51 UTC`],
+  checklist:['Who created the service?','What process created it?','Does kbMNhiIZ.bat exist?','Is the file malicious?','Was there preceding authentication activity?','Was SMB/remote execution involved?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'A random service name, %COMSPEC% invocation, a temp .bat file, the C$ administrative share, and LocalSystem context together are a textbook remote-service-creation persistence pattern. Escalate to L2 and correlate with Scenarios 05/06.'}
+},
+{
+  id:'ALT-2026-0005', title:'Malware Detection (NetExec/Smbexec)',
+  meta:{Source:'Trend Micro', Rule:'Malware Behavior', Severity:'High', Asset:'XXX-ADMIN-01', MITRE:'T1059.003 / T1021', Action:'Terminated'},
+  logs:[`eventId: 100100
+eventName: MALWARE_DETECTION
+objectFilePath: C:\\Windows\\System32\\cmd.exe
+processName: C:\\Windows\\System32\\cmd.exe
+behaviorCat: Threat-Detection
+majorVirusType: Suspicious Activity
+Detection: NetExec Remote Execution via Smbexec
+Action: Terminated
+filterRiskLevel: high
+Timestamp: 2026-06-11T16:39:28Z`],
+  checklist:['What launched cmd.exe?','What command line was executed?','Was this remote execution?','Which account initiated it?','What source host connected?','Did the same activity occur elsewhere?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'"Action: Terminated" is not a closing verdict on its own. NetExec/Smbexec is a known lateral-movement/remote-execution tool signature, and it lines up with the service-creation and .bat artifacts in Scenarios 04/06 on the same host. Escalate to L2.'}
+},
+{
+  id:'ALT-2026-0006', title:'Unrecognized File Execution',
+  meta:{Source:'Trend Micro Application Control', Rule:'Unrecognized Software', Severity:'Medium', Asset:'XXX-ADMIN-01'},
+  logs:[`eventId: 100111
+eventName: APPLICATION_CONTROL_VIOLATION
+objectFilePath: C:\\Windows\\kbMNhiIZ.bat
+category: Execution of Unrecognized Software Allowed
+act: Allowed
+objectFileSize: 50
+processName: C:\\Windows\\System32\\cmd.exe
+processPid: 5192
+processUser: NT AUTHORITY\\SYSTEM
+SHA256: 6C7A8A878691EB8C94B0A6D46B31E8EB9EE502D6ADA6DF3A46225F7498D916F4
+Timestamp: 2026-06-11T16:40:48Z`],
+  checklist:['Does this correlate with the Scenario 04 service creation (same .bat filename)?','Does it correlate with the Scenario 05 malware detection (same host, cmd.exe)?','Is the SHA256 known in threat intel?','Was the file deleted after execution (per the Scenario 04 service command)?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'Same filename (kbMNhiIZ.bat), same host, SYSTEM context, immediately following the 7045 service creation \u2014 this is one persistence/remote-execution chain, not three separate low-value alerts. Escalate to L2 as a single correlated case with 04 and 05.'}
+},
+{
+  id:'ALT-2026-0007', title:'SentinelOne Malware Detection',
+  meta:{Source:'SentinelOne Singularity', Rule:'File Threat', Severity:'Medium', Asset:'INTRANET2', User:'IP 10.30.0.11', Status:'Cleared', MITRE:'-'},
+  logs:[`metadata.event_type: FILE_UNCATEGORIZED
+metadata.vendor_name: SentinelOne
+principal.hostname: INTRANET2
+principal.ip: 10.30.0.11
+target.file.full_path: \\Device\\HarddiskVolume2\\etc\\Ladon12\\Ladon12\\CS\\res\\EdgePwd.dat
+target.file.sha256: f7c72112f0b78ba061c46703f83a481d8acee67fbcaf9290c967de5769f2fc1f
+target.file.size: 319488
+target.file.exif_info.original_file: BrowserGhost.exe
+security_result.threat_name: EdgePwd.dat
+security_result.severity: MEDIUM
+security_result.confidence: HIGH_CONFIDENCE
+security_result.action: BLOCK
+mitigation_status: success`],
+  checklist:['Was the file executed?','Where did it come from?','Was BrowserGhost.exe present?','Is the hash seen on other systems?','Was quarantine successful?','Is there suspicious process activity before/after detection?'],
+  answer:{verdict:'True Positive', escalate:'conditional', rationale:'A file masquerading as "BrowserGhost.exe" but detected as a credential-harvesting artifact (EdgePwd.dat), with high-confidence blocking, is a confirmed malicious file event with successful mitigation. Escalate further only if execution or broader compromise is suspected; otherwise log as contained.'}
+},
+{
+  id:'ALT-2026-0008', title:'Malicious DNS Query',
+  meta:{Source:'Trend Vision One XDR', Rule:'Malicious DNS Communication', Severity:'High', Asset:'AG-DICT-ACER', Process:'AmanOnlineWT.exe', MITRE:'T1071.004'},
+  logs:[`endpointHostName: AG-DICT-ACER
+Process: AmanOnlineWT.exe
+SHA256: 991af8735e8b4be3018277bdacb1241a46f4b6032d76a2f97b551b96b87da43b
+eventId: 4
+Activity: DNS Query
+Observed: AmanOnlineWT.exe contacting malicious domains
+Domains:
+10.17ce.holadns.com
+10.17ce.martianinc.co
+10.17ce.okamiboss.com`],
+  checklist:['Did AmanOnlineWT.exe also make network connections?','Which IP addresses resolved from the domains?','When was the first DNS query?','Which users/hosts contacted these domains?','Is the domain known malicious?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'An unfamiliar process making DNS queries to multiple flagged-malicious domains is a strong indicator of C2 or adware/PUP activity. Escalate and expand scope to check for the same process/domains on other hosts.'}
+},
+{
+  id:'ALT-2026-0009', title:'Malicious Outbound Network Connection',
+  meta:{Source:'Trend Vision One XDR', Rule:'Suspicious Network Activity', Severity:'High', Asset:'AG-DICT-ACER', Process:'AmanOnlineWT.exe', MITRE:'T1095'},
+  logs:[`endpointHostName: AG-DICT-ACER
+Process: AmanOnlineWT.exe
+eventId: 3
+Activity: Outbound Connection
+Destination: 46.165.199.9
+
+--- second event ---
+eventId: 3
+Process: AmanOnlineWT.exe
+Outbound Connection: 178.162.202.97
+
+--- observation ---
+Multiple Network Outbound Connections to malicious IPs`],
+  checklist:['Does this correlate with the DNS queries in Scenario 08?','Are 46.165.199.9 and 178.162.202.97 associated with known malicious infrastructure?','Is this the same process/host as Scenario 08?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'Same process and host as the malicious DNS activity in Scenario 08, now followed by connections to multiple malicious IPs. Escalate to L2 and begin an environment-wide IOC sweep for this process hash and these destinations.'}
+},
+{
+  id:'ALT-2026-0010', title:'Reconnaissance / Horizontal Scanning',
+  meta:{Source:'SIEM / Network Detection', Rule:'Internal Reconnaissance', Severity:'Medium', Asset:'LTO environment', Status:'Open', MITRE:'Discovery'},
+  logs:[`Alert: Internal Reconnaissance / Horizontal Scanning Detected
+Ports: 135, 139, 445 (TCP)
+Activity: Multiple internal hosts contacted across SMB/RPC-related ports
+Alert Count: 13
+Timestamp: 2026-08-18 13:05:56`],
+  checklist:['What source host initiated the scans?','Is the source host an approved scanner?','How many destination hosts were contacted?','Did successful connections occur?','Did authentication events follow?','Is there known vulnerability-scanning activity scheduled?'],
+  answer:{verdict:'Inconclusive', escalate:'conditional', rationale:'SMB/RPC scanning across multiple hosts is consistent with both an approved vulnerability scanner and early-stage lateral-movement reconnaissance. Check the source host against the approved scanner list first: approved scanner \u2192 benign positive; unknown workstation with no scanning mandate \u2192 escalate as suspicious.'}
+},
+{
+  id:'ALT-2026-0011', title:'Suspicious VPN Connection',
+  meta:{Source:'Firewall / VPN', Rule:'Suspicious VPN Connection', Severity:'High', User:'RCPADERES', Status:'Open'},
+  logs:[`User: RCPADERES
+Source Host: 10.237.0.210
+Destination Host: 10.238.4.12
+Destination Port: 10443
+Activity: VPN Connection
+Timestamp: 2026-08-18 12:53:56`],
+  checklist:['Is the user authorized for VPN?','Is the source IP expected?','Was MFA successful?','Is the login location normal?','Was there a prior failed authentication?','What activity occurred after the VPN connection?'],
+  answer:{verdict:'Inconclusive', escalate:'conditional', rationale:'The metadata alone does not establish whether this connection is authorized. Confirm the user\u2019s VPN authorization, MFA status, and source-IP baseline before deciding between benign positive and a suspected compromised-credential escalation.'}
+},
+{
+  id:'ALT-2026-0012', title:'Hidden PowerShell with Unusual Parent',
+  meta:{Source:'SIEM / XDR', Rule:'Hidden PowerShell with Unusual Parent', Severity:'High', User:'ADMIN', Asset:'DESKTOP-9610LSF', MITRE:'Execution / Defense Evasion'},
+  logs:[`Host: DESKTOP-9610LSF
+User: ADMIN
+Process: powershell.exe
+Window: Hidden
+Parent Process: Unusual / Non-standard Parent
+Execution: PowerShell launched with hidden window
+Detection: Endpoint - Hidden Powershell with Unusual Parent
+Timestamp: 2026-08-18 10:57:10`],
+  checklist:['What is the parent process, specifically?','What is the full command line?','Is there an EncodedCommand or ExecutionPolicy bypass?','Was there network activity or file creation afterward?','What browser/email activity preceded execution?'],
+  answer:{verdict:'Inconclusive', escalate:'conditional', rationale:'A hidden PowerShell window with an unusual parent is a defense-evasion signal, but is not enough on its own to call True Positive \u2014 many legitimate admin tools launch PowerShell this way. Pull the command line and correlate with network/file activity before deciding; escalate only if it combines with an encoded command, a download, or an unknown file.'}
+},
+{
+  id:'ALT-2026-0013', title:'Kerberoasting',
+  meta:{Ticket:'INC-2026-0013', Source:'Google SecOps (Chronicle)', Rule:'High Volume Kerberos Ticket Requests (RC4)', Severity:'High', Priority:'P2', Asset:'DC-PH-02', User:'svc-reporting', MITRE:'T1558.003'},
+  logs:[`[Windows Event ID 4769]
+Account Name: svc-reporting
+Account Domain: XXXDOMAIN
+Service Name: MSSQLSvc/db-fin-01.xxxdomain.local:1433
+Client Address: ::ffff:10.12.4.87
+Ticket Encryption Type: 0x17 (RC4-HMAC)
+Failure Code: 0x0
+Timestamp: 2026-08-02T02:14:07Z`,
+`[Chronicle UDM aggregation]
+udm.principal.user.userid: svc-reporting
+udm.principal.ip: 10.12.4.87
+Distinct SPNs requested in 6 minutes: 41
+Encryption type for all 41: RC4-HMAC (0x17)
+Baseline for this account: 1-2 SPN requests/day, AES256 only`],
+  checklist:['Does svc-reporting normally request tickets for many different SPNs?','Why RC4 when the domain supports AES256?','Is the source IP the account\u2019s usual host?','Was there an interactive 4624 logon around the same time?','Any sign of offline hash-cracking on the source host?','When was this account\u2019s password last rotated?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'A 20x+ spike in SPN requests, all downgraded to crackable RC4, from an account with no such baseline, is a well-known Kerberoasting signature. Escalate to L2 for hash-cracking exposure assessment and consider rotating the targeted service account password.'}
+},
+{
+  id:'ALT-2026-0014', title:'LSASS Credential Dumping',
+  meta:{Ticket:'INC-2026-0014', Source:'Sysmon / EDR (Vision One)', Rule:'Non-standard process accessing LSASS', Severity:'High', Priority:'P1', Asset:'HR-WKS-1187', User:'m.santos', MITRE:'T1003.001'},
+  logs:[`[Sysmon EventID 10]
+Timestamp: 2026-08-05 14:02:41
+SourceImage: C:\\Users\\m.santos\\AppData\\Local\\Temp\\rdrCEF.exe
+TargetImage: C:\\Windows\\System32\\lsass.exe
+GrantedAccess: 0x1410
+SourceProcessId: 7716
+TargetProcessId: 692`,
+`[Sysmon EventID 11 - FileCreate]
+Timestamp: 2026-08-05 14:02:52
+TargetFilename: C:\\Users\\m.santos\\AppData\\Local\\Temp\\out.dmp
+Image: C:\\Users\\m.santos\\AppData\\Local\\Temp\\rdrCEF.exe
+Size: 42 MB`],
+  checklist:['Is "rdrCEF.exe" the legitimate signed Adobe helper, or a masquerading binary?','Is the GrantedAccess value consistent with a full memory read?','Was a large .dmp written immediately after?','Was the dump moved off the host afterward?','What parent process launched it, and how did it arrive?','Is m.santos a high-value account?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'A masquerading binary accessing LSASS with broad access rights and immediately writing a 42MB dump file to a temp path is a high-confidence credential-dumping chain regardless of any single ambiguous field. Escalate immediately, isolate the host, and reset credentials for accounts that logged into it.'}
+},
+{
+  id:'ALT-2026-0015', title:'Phishing with Malicious Macro Attachment',
+  meta:{Ticket:'INC-2026-0015', Source:'Email Gateway / Sysmon', Rule:'Office document spawning child process', Severity:'High', Priority:'P2', Asset:'SALES-WKS-0099', User:'r.tuazon', MITRE:'T1566.001'},
+  logs:[`[Email Gateway]
+Sender: billing-dept-noreply@vendor-invoices-secure[.]com
+Recipient: r.tuazon@xxxdomain.xx.xx
+Subject: URGENT - Overdue Invoice #88213 Attached
+Attachment: Invoice_88213.xlsm
+SPF: fail
+DKIM: none
+Delivered: Yes (opened 4 minutes after delivery)
+Timestamp: 2026-08-06 09:41:02`,
+`[Sysmon EventID 1]
+ParentImage: C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE
+Image: C:\\Windows\\System32\\wscript.exe
+CommandLine: wscript.exe //B //nologo update.vbs
+CurrentDirectory: C:\\Users\\r.tuazon\\AppData\\Local\\Temp\\
+Timestamp: 2026-08-06 09:41:19`],
+  checklist:['Did the email fail SPF/DKIM, and is the sender domain a lookalike?','Did Excel spawn a script host \u2014 a classic macro-drop pattern?','What does update.vbs do (can it be extracted and detonated)?','Did wscript.exe make outbound connections afterward?','Was the same attachment/sender delivered elsewhere?','Did the user report it, or was it opened silently?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'A failed-authentication lookalike sender delivering a macro-enabled workbook that spawns a script host is a confirmed initial-access chain. Escalate for detonation/sandbox analysis and an org-wide sweep of the sender domain and attachment hash; keep the impact/lateral-movement question open until network activity from the child process is confirmed.'}
+},
+{
+  id:'ALT-2026-0016', title:'Ransomware Precursor (Mass File Rename)',
+  meta:{Ticket:'INC-2026-0016', Source:'Trend Micro Vision One (OAT)', Rule:'Mass File Rename / Extension Change', Severity:'Critical', Priority:'P1', Asset:'FILE-SVR-02', User:'svc-backup', MITRE:'T1486'},
+  logs:[`eventId: 100142
+eventName: RANSOMWARE_BEHAVIOR_DETECTED
+objectFilePath: \\\\FILE-SVR-02\\Shares\\Finance\\
+filesRenamedCount: 1842
+filesRenamedWindowSeconds: 96
+newExtension: .lockph
+processName: C:\\Users\\Public\\svchosts.exe
+processUser: XXXDOMAIN\\svc-backup
+parentProcess: C:\\Windows\\System32\\wbem\\WmiPrvSE.exe
+Action: Process Terminated, Files Quarantined (partial)
+Timestamp: 2026-08-09T02:11:53Z`],
+  checklist:['Is "svchosts.exe" (extra "s") legitimate, and why is it in C:\\Users\\Public?','Why did it run under svc-backup?','Was WMI used to launch it remotely \u2014 lateral movement?','How many files were encrypted before termination, and are backups unaffected?','Are other file servers showing the same extension?','Was a ransom note dropped?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'This is active ransomware encryption, not a precursor \u2014 a masquerading binary launched via WMI from another host, running under a service account, renaming nearly 2000 files in 96 seconds. Escalate immediately as a P1 incident, isolate the source of the WMI execution as well as this host, and verify backup integrity before any recovery step.'}
+},
+{
+  id:'ALT-2026-0017', title:'DNS Tunneling',
+  meta:{Ticket:'INC-2026-0017', Source:'Google SecOps (Chronicle)', Rule:'High-entropy TXT queries / abnormal subdomain volume', Severity:'Medium', Priority:'P3', Asset:'DB-SVR-04', MITRE:'T1071.004'},
+  logs:[`udm.principal.hostname: DB-SVR-04
+udm.principal.ip: 10.20.8.14
+udm.network.dns.questions.name (sample):
+  7f3a9c1e0b.data-relay-sync[.]net
+  b21d9e4a77.data-relay-sync[.]net
+  44fca01dd9.data-relay-sync[.]net
+  (312 unique subdomains queried in 40 minutes)
+udm.network.dns.questions.type: TXT
+Average subdomain length: 34 characters
+Average query interval: 7.4 seconds`],
+  checklist:['Should this server make direct external DNS queries, or only via an internal forwarder?','Is the domain sanctioned/known, or newly registered?','What process is generating the queries?','Is there irregular outbound volume consistent with tunneling?','Has any other host queried this domain?','Could a legitimate security agent be using TXT records itself?'],
+  answer:{verdict:'Inconclusive', escalate:true, rationale:'High-entropy subdomains, TXT queries, and a tight interval are consistent with DNS tunneling, but this technique is also used by some legitimate telemetry tools. Escalate to L2 for domain reputation and process attribution rather than closing on pattern alone.'}
+},
+{
+  id:'ALT-2026-0018', title:'RDP Brute Force',
+  meta:{Ticket:'INC-2026-0018', Source:'Sophos XGS4500 (Firewall)', Rule:'RDP failures followed by success', Severity:'High', Priority:'P2', Asset:'NOC-JMPBOX-02', MITRE:'T1021.001 / T1110'},
+  logs:[`Source IP: 91.243.x.x (external, GeoIP: Eastern Europe)
+Destination IP: 10.5.0.20 (internet-facing jump host)
+Destination Port: 3389
+Failed Attempts: 214 over 11 minutes (usernames: administrator, admin, backup, svc-admin)
+Result: 1 successful authentication \u2014 user "administrator" \u2014 at 03:47:52
+Timestamp range: 2026-08-11 03:36:10 - 03:47:52`],
+  checklist:['Should this host be internet-facing on 3389 at all?','Is the source IP a known scanner/pentest range?','Did the successful logon match an expected maintenance window?','What happened immediately after the successful logon?','Why did 214 failures not trigger a lockout \u2014 is MFA enforced?','Has this source targeted other internet-facing hosts?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'An unattributed external IP achieving a successful "administrator" logon on an internet-facing host, with no MFA and no lockout, is a confirmed compromise as shown. Escalate immediately and treat the account as burned regardless of what post-logon activity is found. (Only a confirmed approved scanner/maintenance window with MFA enforced would shift this to benign positive.)'}
+},
+{
+  id:'ALT-2026-0019', title:'Cloud Identity: Impossible Travel + New MFA Device',
+  meta:{Ticket:'INC-2026-0019', Source:'Cloud IdP Sign-In Logs (Entra ID)', Rule:'Impossible Travel + New MFA Method', Severity:'High', Priority:'P1', User:'c.reyes', MITRE:'T1078.004'},
+  logs:[`Sign-in 1: Manila, PH (10:02:14 local) \u2014 success
+Sign-in 2: Bucharest, RO (10:19:47 local, 17 min later) \u2014 success
+Impossible Travel: True (~2,400 km in 17 min)
+
+MFA Method Registered: Authenticator app, from Bucharest session, 10:21:03
+
+Mailbox Rule Created: name "..", moves messages containing "invoice" to
+RSS Feeds folder (hidden), created from Bucharest session, 10:24:38`],
+  checklist:['Was Manila from a known device/IP, Bucharest from an unrecognized one?','Is registering new MFA from a brand-new location itself a red flag?','What is the purpose of the obfuscated invoice-hiding inbox rule?','Were any emails sent requesting payment redirection after this?','Is c.reyes (Finance Director) a high-value target?','Was there a prior password-spray or MFA-fatigue alert for this account?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'Impossible travel, a newly registered MFA method from the second location, and an obfuscated rule hiding invoice emails together are classic Business Email Compromise staging. Escalate as P1 immediately: revoke sessions and the new MFA method, force password reset, and review outbound mail and any payment/vendor changes made during the window.'}
+},
+{
+  id:'ALT-2026-0020', title:'Large USB Data Transfer',
+  meta:{Ticket:'INC-2026-0020', Source:'EDR / DLP', Rule:'Large volume file copy to removable storage', Severity:'Medium', Priority:'P3', Asset:'PROC-WKS-0777', User:'e.villanueva', MITRE:'T1052.001'},
+  logs:[`Device: SanDisk Ultra USB 3.0 (Serial: 4C531001...)
+User: e.villanueva (Procurement)
+Files copied: 1204
+Total size: 6.7 GB
+File types: .xlsx, .pdf, .docx
+Source paths: \\\\FILE-SVR-01\\Shares\\Procurement\\Bids\\, \\Contracts\\
+Timestamp: 2026-08-12 17:52:00 - 18:04:31 (near end of business day)`],
+  checklist:['Is e.villanueva authorized to access bid and contract data?','Is there an approved business reason on file for this copy?','Is DLP configured to block or only log removable media here?','Does the timing align with any HR-flagged risk indicator?','Has this user copied similarly large volumes before?','Was the device encrypted, and did it leave the building?'],
+  answer:{verdict:'Inconclusive', escalate:'conditional', rationale:'The volume and sensitivity (active procurement bids/contracts) warrant treating this as a potential insider-risk event, but do not assert exfiltration intent without confirming a lack of authorization. Verify business justification and DLP policy status first; escalate to the insider-risk workflow only if none is found.'}
+},
+{
+  id:'ALT-2026-0021', title:'Suspicious Scheduled Task Creation',
+  meta:{Ticket:'INC-2026-0021', Source:'Windows Event Logs', Rule:'Scheduled task with encoded PowerShell action', Severity:'High', Priority:'P2', Asset:'WEB-DMZ-01', User:'SYSTEM (via SMB from XXX-ADMIN-01)', MITRE:'T1053.005'},
+  logs:[`[Windows Event ID 4698]
+Task Name: \\Microsoft\\Windows\\SystemHealth\\Telemetry_Sync
+Action: powershell.exe -w hidden -enc <BASE64_DATA>
+Trigger: At logon of any user, repeat every 15 minutes indefinitely
+Creator Subject: mis-admin, Logon ID 0x3F2A19
+Source Network Address: 10.6.120.1 (XXX-ADMIN-01)
+Timestamp: 2026-08-14 22:47:03 UTC`],
+  checklist:['Is "Telemetry_Sync" a real Microsoft/vendor task, or a blend-in name?','Was this created remotely from XXX-ADMIN-01 \u2014 the host from Scenario 01/04?','Does the indefinite 15-minute trigger match any approved agent?','What does the encoded PowerShell decode to?','Is mis-admin showing other compromise indicators?','Is WEB-DMZ-01 internet-facing?'],
+  answer:{verdict:'True Positive', escalate:true, rationale:'The blend-in naming, remote creation via the already-flagged XXX-ADMIN-01/mis-admin, an indefinite recurring trigger, and an encoded payload together are a strong persistence signature. Escalate and correlate as one case with ALT-2026-0001/0004/0006.'}
+},
+{
+  id:'ALT-2026-0022', title:'WAF: SQL Injection Attempt',
+  meta:{Ticket:'INC-2026-0022', Source:'Infinivan DC WAF', Rule:'SQL Injection Pattern Detected', Severity:'Medium', Priority:'P3', Asset:'PORTAL-WEB-01', MITRE:'T1190'},
+  logs:[`Source IP: 203.0.113.44
+URI: /services/track-application.php?ref=1001' UNION SELECT username,password FROM users--
+User-Agent: python-requests/2.31.0
+Action: Blocked
+Response Code: 403
+Timestamp: 2026-08-16 05:12:47 UTC
+Additional requests from same source: 87 similar payloads over 3 minutes, all Blocked (403)`],
+  checklist:['Did the WAF block every request, or did any return 200 (a bypass)?','Is the source IP a known scanner/research range?','Does this endpoint build SQL from user input without parameterization \u2014 a code finding regardless of WAF outcome?','Did the source probe other endpoints?','Are other source IPs sending similar payloads (broad scan vs. targeted)?','Is this IP in any threat intel feed?'],
+  answer:{verdict:'True Positive', escalate:false, rationale:'This is a genuine, real attack attempt \u2014 the fact that all 87 payloads were blocked with no 200 response means it was fully mitigated, not that it wasn\u2019t real. Log as a blocked exploitation attempt; no incident escalation is needed unless a bypass is later found. Forward to the application owner as a code-hardening finding and watchlist the source IP.'}
+}
+];
+
+const VERDICTS = ['False Positive','Benign Positive','True Positive','Inconclusive'];
+const responses = {};
+let idx = 0;
+
+function ensureResp(id){
+  if(!responses[id]) responses[id] = {host:'',user:'',process:'',parentProcess:'',cmdline:'',srcip:'',dstip:'',dstport:'',whatHappened:'',evidence:'',related:'',ioc:'',benignExplain:'',verdict:'',severityAssess:'',escalate:'',reason:'',nextAction:'',checked:false,correct:null};
+  return responses[id];
+}
+
+function sevClass(sev){
+  return 'sev-' + (sev||'Medium').replace(/[^A-Za-z]/g,'');
+}
+
+function el(tag, cls){
+  const e = document.createElement(tag);
+  if(cls) e.className = cls;
+  return e;
+}
+
+function renderTicks(){
+  const wrap = document.getElementById('ticks');
+  wrap.innerHTML = '';
+  SCENARIOS.forEach((s,i)=>{
+    const t = el('div','tick');
+    const r = responses[s.id];
+    if(r && r.checked){ t.classList.add(r.correct ? 'correct' : 'incorrect'); }
+    else if(r && r.verdict){ t.classList.add('answered'); }
+    if(i===idx) t.classList.add('current');
+    t.title = s.title;
+    t.addEventListener('click', ()=>{ saveCurrent(); idx=i; render(); });
+    wrap.appendChild(t);
+  });
+}
+
+function saveCurrent(){
+  if(document.getElementById('summaryView').style.display !== 'none') return;
+  const s = SCENARIOS[idx];
+  const r = ensureResp(s.id);
+  const g = id => document.getElementById(id);
+  ['host','user','process','parentProcess','cmdline','srcip','dstip','dstport','whatHappened','evidence','related','ioc','benignExplain','severityAssess','reason','nextAction'].forEach(f=>{
+    const node = g(f);
+    if(node) r[f] = node.value;
+  });
+  const vChecked = document.querySelector('input[name="verdict"]:checked');
+  r.verdict = vChecked ? vChecked.value : r.verdict;
+  const eChecked = document.querySelector('input[name="escalate"]:checked');
+  r.escalate = eChecked ? eChecked.value : r.escalate;
+}
+
+function buildField(labelText, id, type, value){
+  const wrap = el('div','field');
+  const label = el('label'); label.setAttribute('for',id); label.textContent = labelText;
+  wrap.appendChild(label);
+  let input;
+  if(type==='textarea'){ input = el('textarea'); }
+  else { input = el('input'); input.type='text'; }
+  input.id = id; input.value = value||'';
+  input.addEventListener('input', ()=>{ /* saved on nav */ });
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function renderScenario(){
+  document.getElementById('summaryView').style.display = 'none';
+  document.getElementById('scenarioView').style.display = 'block';
+  const s = SCENARIOS[idx];
+  const r = ensureResp(s.id);
+  document.getElementById('caseCounter').textContent = 'Case ' + String(idx+1).padStart(2,'0') + ' / ' + SCENARIOS.length;
+  const checkedCount = Object.values(responses).filter(x=>x.checked).length;
+  const correctCount = Object.values(responses).filter(x=>x.checked && x.correct).length;
+  document.getElementById('scoreCounter').textContent = checkedCount ? ('Checked ' + checkedCount + ' \u00b7 ' + correctCount + ' correct') : '';
+  renderTicks();
+
+  const view = document.getElementById('scenarioView');
+  view.innerHTML = '';
+
+  // Evidence panel
+  const evPanel = el('div','panel');
+  const tbar = el('div','titlebar');
+  const titleEl = el('div','scen-title'); titleEl.textContent = s.id + ' \u2014 ' + s.title;
+  const badge = el('span','sev-badge ' + sevClass(s.meta.Severity)); badge.textContent = s.meta.Severity || '';
+  tbar.appendChild(titleEl); tbar.appendChild(badge);
+  evPanel.appendChild(tbar);
+
+  const metaGrid = el('div','meta-grid');
+  Object.keys(s.meta).forEach(k=>{
+    if(k==='Severity') return;
+    const item = el('div','meta-item');
+    const kEl = el('span','k'); kEl.textContent = k;
+    const vEl = el('span','v'); vEl.textContent = s.meta[k];
+    item.appendChild(kEl); item.appendChild(vEl);
+    metaGrid.appendChild(item);
+  });
+  evPanel.appendChild(metaGrid);
+  view.appendChild(evPanel);
+
+  // Raw log panel
+  const logPanel = el('div','panel');
+  const logH = el('h2'); logH.textContent = 'RAW LOG';
+  logPanel.appendChild(logH);
+  s.logs.forEach(txt=>{
+    const pre = el('pre','logblock');
+    pre.textContent = txt;
+    logPanel.appendChild(pre);
+  });
+  const details = document.createElement('details'); details.className='checklist';
+  const summary = document.createElement('summary'); summary.textContent = 'Investigative checklist (expand for guidance)';
+  details.appendChild(summary);
+  const ul = el('ul');
+  s.checklist.forEach(q=>{ const li=document.createElement('li'); li.textContent=q; ul.appendChild(li); });
+  details.appendChild(ul);
+  logPanel.appendChild(details);
+  view.appendChild(logPanel);
+
+  // Form panel
+  const formPanel = el('div','panel');
+  const formH = el('h2'); formH.textContent = 'YOUR TRIAGE';
+  formPanel.appendChild(formH);
+
+  const grid2 = el('div','grid2');
+  [['Host','host'],['User','user'],['Process','process'],['Parent Process','parentProcess'],
+   ['Source IP','srcip'],['Destination IP','dstip'],['Destination Port','dstport']].forEach(([lbl,id])=>{
+    grid2.appendChild(buildField(lbl,id,'text',r[id]));
+  });
+  formPanel.appendChild(grid2);
+  formPanel.appendChild(buildField('Command Line','cmdline','textarea',r.cmdline));
+  formPanel.appendChild(buildField('What happened?','whatHappened','textarea',r.whatHappened));
+  formPanel.appendChild(buildField('Evidence reviewed','evidence','textarea',r.evidence));
+  formPanel.appendChild(buildField('Related events','related','textarea',r.related));
+  formPanel.appendChild(buildField('IOC findings','ioc','textarea',r.ioc));
+  formPanel.appendChild(buildField('Expected / benign explanation (if any)','benignExplain','textarea',r.benignExplain));
+
+  // Verdict fieldset
+  const vfs = el('fieldset');
+  const vleg = el('legend'); vleg.textContent = 'L1 Verdict';
+  vfs.appendChild(vleg);
+  const vrow = el('div','opt-row');
+  VERDICTS.forEach(v=>{
+    const lbl = el('label');
+    const inp = el('input'); inp.type='radio'; inp.name='verdict'; inp.value=v;
+    if(r.verdict===v) inp.checked = true;
+    lbl.appendChild(inp);
+    lbl.appendChild(document.createTextNode(v));
+    vrow.appendChild(lbl);
+  });
+  vfs.appendChild(vrow);
+  formPanel.appendChild(vfs);
+
+  // Severity + escalation row
+  const grid2b = el('div','grid2');
+  const sevField = el('div','field');
+  const sevLabel = el('label'); sevLabel.textContent='Severity assessment';
+  const sevSelect = el('select'); sevSelect.id='severityAssess';
+  ['','Low','Medium','High','Critical'].forEach(opt=>{
+    const o = document.createElement('option'); o.value=opt; o.textContent = opt || 'Select severity';
+    if(r.severityAssess===opt) o.selected = true;
+    sevSelect.appendChild(o);
+  });
+  sevField.appendChild(sevLabel); sevField.appendChild(sevSelect);
+  grid2b.appendChild(sevField);
+
+  const efs = el('fieldset');
+  const eleg = el('legend'); eleg.textContent='Escalation Required';
+  efs.appendChild(eleg);
+  const erow = el('div','opt-row');
+  ['No','Yes'].forEach(v=>{
+    const lbl = el('label');
+    const inp = el('input'); inp.type='radio'; inp.name='escalate'; inp.value=v;
+    if(r.escalate===v) inp.checked = true;
+    lbl.appendChild(inp);
+    lbl.appendChild(document.createTextNode(v));
+    erow.appendChild(lbl);
+  });
+  efs.appendChild(erow);
+  grid2b.appendChild(efs);
+  formPanel.appendChild(grid2b);
+
+  formPanel.appendChild(buildField('Reason','reason','textarea',r.reason));
+  formPanel.appendChild(buildField('Recommended next action','nextAction','textarea',r.nextAction));
+
+  // Answer key reveal area
+  const akWrap = el('div');
+  akWrap.id = 'answerArea';
+  if(r.checked){ akWrap.appendChild(buildAnswerKey(s,r)); }
+  formPanel.appendChild(akWrap);
+
+  // Buttons
+  const btnrow = el('div','btnrow');
+  const leftGroup = el('div','left-group');
+  const prevBtn = el('button'); prevBtn.textContent='\u2190 Previous'; prevBtn.disabled = idx===0;
+  prevBtn.addEventListener('click', ()=>{ saveCurrent(); idx=Math.max(0,idx-1); render(); });
+  leftGroup.appendChild(prevBtn);
+
+  const checkBtn = el('button','primary'); checkBtn.textContent='Check answer';
+  checkBtn.addEventListener('click', ()=>{
+    saveCurrent();
+    const rr = ensureResp(s.id);
+    if(!rr.verdict){ alert('Pick a verdict first, then check your answer.'); return; }
+    rr.checked = true;
+    rr.correct = computeCorrect(s.answer, rr);
+    render();
+  });
+  leftGroup.appendChild(checkBtn);
+  btnrow.appendChild(leftGroup);
+
+  const rightGroup = el('div','right-group');
+  const nextBtn = el('button','primary');
+  nextBtn.textContent = idx === SCENARIOS.length-1 ? 'Finish \u2192' : 'Next \u2192';
+  nextBtn.addEventListener('click', ()=>{
+    saveCurrent();
+    if(idx === SCENARIOS.length-1){ renderSummary(); }
+    else { idx++; render(); }
+  });
+  rightGroup.appendChild(nextBtn);
+  btnrow.appendChild(rightGroup);
+
+  formPanel.appendChild(btnrow);
+  view.appendChild(formPanel);
+}
+
+function computeCorrect(answer, r){
+  if(answer.verdict !== r.verdict) return false;
+  if(answer.escalate === 'conditional') return true;
+  const expectedEsc = answer.escalate ? 'Yes' : 'No';
+  return r.escalate === expectedEsc;
+}
+
+function buildAnswerKey(s,r){
+  const box = el('div','answerkey');
+  const line = el('div','verdict-line');
+  const p1 = el('span','pill neutral'); p1.textContent = 'Expected: ' + s.answer.verdict;
+  line.appendChild(p1);
+  const escText = s.answer.escalate === 'conditional' ? 'Escalation: depends (see rationale)' : ('Escalation: ' + (s.answer.escalate ? 'Yes' : 'No'));
+  const p2 = el('span','pill neutral'); p2.textContent = escText;
+  line.appendChild(p2);
+  const p3 = el('span','pill ' + (r.correct ? 'correct' : 'incorrect'));
+  p3.textContent = r.correct ? 'Your verdict matched' : 'Your verdict differed';
+  line.appendChild(p3);
+  box.appendChild(line);
+  const rat = el('div'); rat.textContent = s.answer.rationale;
+  box.appendChild(rat);
+  return box;
+}
+
+function renderSummary(){
+  document.getElementById('scenarioView').style.display = 'none';
+  const view = document.getElementById('summaryView');
+  view.style.display = 'block';
+  view.innerHTML = '';
+  document.getElementById('caseCounter').textContent = 'Practice complete \u2014 ' + SCENARIOS.length + ' cases';
+  const checkedCount = Object.values(responses).filter(x=>x.checked).length;
+  const correctCount = Object.values(responses).filter(x=>x.checked && x.correct).length;
+  document.getElementById('scoreCounter').textContent = checkedCount ? ('Checked ' + checkedCount + ' \u00b7 ' + correctCount + ' correct') : '';
+  renderTicks();
+
+  const panel = el('div','panel');
+  const h = el('h2'); h.textContent = 'SESSION SUMMARY';
+  panel.appendChild(h);
+
+  const answeredCount = Object.values(responses).filter(x=>x.verdict).length;
+  const summaryLine = el('p');
+  summaryLine.style.margin = '0 0 4px';
+  summaryLine.style.fontSize = '14px';
+  summaryLine.textContent = answeredCount + ' of ' + SCENARIOS.length + ' cases given a verdict. ' +
+    (checkedCount ? (correctCount + ' of ' + checkedCount + ' checked answers matched the expected classification.') : 'No answers checked yet.');
+  panel.appendChild(summaryLine);
+
+  const table = el('table','summary-table');
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  ['Case','Your verdict','Expected','Result'].forEach(h=>{ const th=document.createElement('th'); th.textContent=h; hr.appendChild(th); });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  SCENARIOS.forEach(s=>{
+    const r = responses[s.id] || {};
+    const tr = document.createElement('tr');
+    const c1 = document.createElement('td'); c1.textContent = s.id + ' \u2014 ' + s.title;
+    const c2 = document.createElement('td'); c2.textContent = r.verdict || '\u2014';
+    const c3 = document.createElement('td'); c3.textContent = s.answer.verdict;
+    const c4 = document.createElement('td');
+    c4.textContent = r.checked ? (r.correct ? 'Correct' : 'Differed') : 'Not checked';
+    tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tr.appendChild(c4);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  panel.appendChild(table);
+
+  const btnrow = el('div','btnrow');
+  btnrow.style.marginTop = '16px';
+  const leftGroup = el('div','left-group');
+  const backBtn = el('button'); backBtn.textContent = '\u2190 Review cases';
+  backBtn.addEventListener('click', ()=>{ idx=0; render(); });
+  leftGroup.appendChild(backBtn);
+  const restartBtn = el('button'); restartBtn.textContent = 'Restart practice';
+  restartBtn.addEventListener('click', ()=>{
+    if(confirm('This clears all your answers. Continue?')){
+      Object.keys(responses).forEach(k=>delete responses[k]);
+      idx = 0;
+      render();
+    }
+  });
+  leftGroup.appendChild(restartBtn);
+  btnrow.appendChild(leftGroup);
+
+  const rightGroup = el('div','right-group');
+  const exportBtn = el('button','primary'); exportBtn.textContent = 'Export my triage report';
+  exportBtn.addEventListener('click', exportReport);
+  rightGroup.appendChild(exportBtn);
+  btnrow.appendChild(rightGroup);
+
+  panel.appendChild(btnrow);
+  view.appendChild(panel);
+}
+
+function exportReport(){
+  let out = 'L1 SOC INVESTIGATION & TRIAGE PRACTICE - EXPORTED REPORT\n';
+  out += 'Generated: ' + new Date().toISOString() + '\n';
+  out += '='.repeat(60) + '\n\n';
+  SCENARIOS.forEach(s=>{
+    const r = responses[s.id] || {};
+    out += s.id + ' - ' + s.title + '\n';
+    out += '-'.repeat(60) + '\n';
+    out += 'Host: ' + (r.host||'') + '\n';
+    out += 'User: ' + (r.user||'') + '\n';
+    out += 'Process: ' + (r.process||'') + '\n';
+    out += 'Parent Process: ' + (r.parentProcess||'') + '\n';
+    out += 'Command Line: ' + (r.cmdline||'') + '\n';
+    out += 'Source IP: ' + (r.srcip||'') + '\n';
+    out += 'Destination IP: ' + (r.dstip||'') + '\n';
+    out += 'Destination Port: ' + (r.dstport||'') + '\n\n';
+    out += 'What happened?\n' + (r.whatHappened||'') + '\n\n';
+    out += 'Evidence reviewed:\n' + (r.evidence||'') + '\n\n';
+    out += 'Related events:\n' + (r.related||'') + '\n\n';
+    out += 'IOC findings:\n' + (r.ioc||'') + '\n\n';
+    out += 'Expected/benign explanation:\n' + (r.benignExplain||'') + '\n\n';
+    out += 'L1 Verdict: ' + (r.verdict||'(none)') + '\n';
+    out += 'Severity assessment: ' + (r.severityAssess||'') + '\n';
+    out += 'Escalation Required: ' + (r.escalate||'') + '\n';
+    out += 'Reason: ' + (r.reason||'') + '\n';
+    out += 'Recommended Next Action: ' + (r.nextAction||'') + '\n\n';
+    if(r.checked){
+      out += 'Expected classification: ' + s.answer.verdict + '\n';
+      out += 'Result: ' + (r.correct ? 'Matched' : 'Differed') + '\n';
+    }
+    out += '\n' + '='.repeat(60) + '\n\n';
+  });
+  const blob = new Blob([out], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'l1-soc-triage-practice-report.txt';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function render(){
+  if(idx >= SCENARIOS.length){ renderSummary(); return; }
+  renderScenario();
+}
+
+render();
+</script>
+</body>
+</html>
