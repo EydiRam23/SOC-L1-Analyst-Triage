@@ -172,7 +172,7 @@
 
 <script>
 const SUBMIT_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxHRuVeyxLtCj6Lwrk8rLLFBBtSKKf1jsfc1KtcSitWMreTYFotwdbXiKp3whcb2I4/exec';
-const REQUIRE_EMAIL = false;  
+const SHOW_LEADERBOARD = true;
 const SCENARIOS = [
 {
   id:'ALT-2026-0001', title:'Failed Windows Logon',
@@ -978,7 +978,7 @@ function buildPayload(){
   return {
     sessionId: participant.sessionId,
     name: participant.name,
-    email: '',
+    email: participant.email || '',
     team: '',
     displayName: participant.displayName || participant.name,
     listPublicly: !!participant.listPublicly,
@@ -1037,7 +1037,8 @@ function exportReport(){
   let out = 'L1 SOC INVESTIGATION & TRIAGE PRACTICE - EXPORTED REPORT\n';
   out += 'Generated: ' + new Date().toISOString() + '\n';
   if(participant){
-    out += 'Participant: ' + participant.name + '\n';
+    out += 'Username: ' + participant.name + '\n';
+    out += 'Email: ' + (participant.email||'') + '\n';
     out += 'Session ID: ' + participant.sessionId + '\n';
     out += 'Started: ' + participant.startedAt + '\n';
   }
@@ -1097,7 +1098,8 @@ function renderRegister(){
 
   const panel = el('div','panel');
 
-  panel.appendChild(buildField('Full name or username *','regName','text',''));
+  panel.appendChild(buildField('Username *','regName','text',''));
+  panel.appendChild(buildField('Email *','regEmail','text',''));
 
   if(SUBMIT_ENDPOINT && SHOW_LEADERBOARD){
     const cr = el('div','check-row');
@@ -1113,8 +1115,8 @@ function renderRegister(){
 
   const notice = el('p','notice');
   notice.textContent = SUBMIT_ENDPOINT
-    ? 'When you finish, the name you enter here plus your session ID, completion time and score are sent to the training administrator. Nothing is sent until you press Submit results on the final screen.'
-    : 'This page is running in offline mode. Your score stays in this browser only \u2014 you can download your own report at the end.';
+    ? 'When you finish, your username and email plus your session ID, completion time and score are sent to the training administrator. Only your username is ever shown on the public leaderboard \u2014 your email is not. Nothing is sent until you press Submit results on the final screen.'
+    : 'This page is running in offline mode. Your username, email and score stay in this browser only \u2014 you can download your own report at the end.';
   panel.appendChild(notice);
 
   const btnrow = el('div','btnrow');
@@ -1135,19 +1137,30 @@ function renderRegister(){
   gate.appendChild(panel);
   view.appendChild(gate);
 
-  document.getElementById('regName').addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
+  ['regName','regEmail'].forEach(id=>{
+    document.getElementById(id).addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
+  });
   document.getElementById('regName').focus();
 }
 
 function beginSession(){
   const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
   const errEl = document.getElementById('regError');
-  if(name.length < 2){ errEl.textContent = 'Enter your full name or username to continue.'; document.getElementById('regName').focus(); return; }
+  if(name.length < 2){
+    errEl.textContent = 'Enter a username to continue.';
+    document.getElementById('regName').focus(); return;
+  }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    errEl.textContent = 'Enter a valid email address.';
+    document.getElementById('regEmail').focus(); return;
+  }
   errEl.textContent = '';
   const pubNode = document.getElementById('regPublic');
   participant = {
     sessionId: makeSessionId(),
     name: name,
+    email: email,
     displayName: name,
     listPublicly: pubNode ? pubNode.checked : false,
     startedAt: new Date().toISOString()
