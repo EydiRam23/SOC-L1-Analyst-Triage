@@ -540,11 +540,9 @@ Additional requests from same source: 87 similar payloads over 3 minutes, all Bl
                      SETUP_scoreboard.md). Leave it as '' to run the page in
                      offline mode: participants still see their own score and
                      can download a report, but nothing is sent to you.
-   REQUIRE_EMAIL   : set to false if you only want a name.
    SHOW_LEADERBOARD: set to false to hide the public board entirely.
    ========================================================================== */
 const SUBMIT_ENDPOINT = '';
-const REQUIRE_EMAIL = true;
 const SHOW_LEADERBOARD = true;
 
 const VERDICTS = ['False Positive','Benign Positive','True Positive','Inconclusive'];
@@ -978,8 +976,8 @@ function buildPayload(){
   return {
     sessionId: participant.sessionId,
     name: participant.name,
-    email: participant.email,
-    team: participant.team,
+    email: '',
+    team: '',
     displayName: participant.displayName || participant.name,
     listPublicly: !!participant.listPublicly,
     startedAt: participant.startedAt,
@@ -1038,8 +1036,6 @@ function exportReport(){
   out += 'Generated: ' + new Date().toISOString() + '\n';
   if(participant){
     out += 'Participant: ' + participant.name + '\n';
-    out += 'ID/Email: ' + (participant.email||'') + '\n';
-    out += 'Team: ' + (participant.team||'') + '\n';
     out += 'Session ID: ' + participant.sessionId + '\n';
     out += 'Started: ' + participant.startedAt + '\n';
   }
@@ -1099,19 +1095,13 @@ function renderRegister(){
 
   const panel = el('div','panel');
 
-  const nameField = buildField('Full name *','regName','text','');
-  const emailField = buildField('Email or employee/student ID' + (REQUIRE_EMAIL ? ' *' : ''),'regEmail','text','');
-  const teamField = buildField('Team or organization (optional)','regTeam','text','');
-  panel.appendChild(nameField);
-  panel.appendChild(emailField);
-  panel.appendChild(teamField);
+  panel.appendChild(buildField('Full name or username *','regName','text',''));
 
   if(SUBMIT_ENDPOINT && SHOW_LEADERBOARD){
-    panel.appendChild(buildField('Leaderboard display name (optional \u2014 defaults to your full name)','regDisplay','text',''));
     const cr = el('div','check-row');
     const cb = el('input'); cb.type='checkbox'; cb.id='regPublic'; cb.checked = true;
     const cl = el('label'); cl.setAttribute('for','regPublic');
-    cl.textContent = 'List me on the public leaderboard. Untick to stay off it \u2014 your score is still recorded for the training administrator, just shown as anonymous to other analysts.';
+    cl.textContent = 'List me on the public leaderboard. Untick to stay off it \u2014 your score is still recorded for the training administrator, just not shown to other analysts.';
     cr.appendChild(cb); cr.appendChild(cl);
     panel.appendChild(cr);
   }
@@ -1121,7 +1111,7 @@ function renderRegister(){
 
   const notice = el('p','notice');
   notice.textContent = SUBMIT_ENDPOINT
-    ? 'When you finish, your name, ID, session ID, completion time and score are sent to the training administrator. Nothing is collected until you press Submit results on the final screen.'
+    ? 'When you finish, the name you enter here plus your session ID, completion time and score are sent to the training administrator. Nothing is sent until you press Submit results on the final screen.'
     : 'This page is running in offline mode. Your score stays in this browser only \u2014 you can download your own report at the end.';
   panel.appendChild(notice);
 
@@ -1144,26 +1134,19 @@ function renderRegister(){
   view.appendChild(gate);
 
   document.getElementById('regName').addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
-  document.getElementById('regEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') beginSession(); });
   document.getElementById('regName').focus();
 }
 
 function beginSession(){
   const name = document.getElementById('regName').value.trim();
-  const email = document.getElementById('regEmail').value.trim();
-  const team = document.getElementById('regTeam').value.trim();
   const errEl = document.getElementById('regError');
-  if(name.length < 2){ errEl.textContent = 'Enter your full name to continue.'; document.getElementById('regName').focus(); return; }
-  if(REQUIRE_EMAIL && email.length < 3){ errEl.textContent = 'Enter your email or ID so your score can be matched to you.'; document.getElementById('regEmail').focus(); return; }
+  if(name.length < 2){ errEl.textContent = 'Enter your full name or username to continue.'; document.getElementById('regName').focus(); return; }
   errEl.textContent = '';
-  const dispNode = document.getElementById('regDisplay');
   const pubNode = document.getElementById('regPublic');
   participant = {
     sessionId: makeSessionId(),
     name: name,
-    email: email,
-    team: team,
-    displayName: (dispNode && dispNode.value.trim()) ? dispNode.value.trim() : name,
+    displayName: name,
     listPublicly: pubNode ? pubNode.checked : false,
     startedAt: new Date().toISOString()
   };
@@ -1178,7 +1161,6 @@ function renderWhoami(){
   if(!participant) return;
   const n = el('span','name'); n.textContent = participant.name;
   bar.appendChild(n);
-  if(participant.team){ const t = el('span'); t.textContent = participant.team; bar.appendChild(t); }
   const s = el('span','sid'); s.textContent = participant.sessionId;
   bar.appendChild(s);
 }
@@ -1266,7 +1248,7 @@ function renderLeaderboard(){
       const table = el('table','lb');
       const thead = document.createElement('thead');
       const hr = document.createElement('tr');
-      ['#','Analyst','Team','Score','Accuracy','Time'].forEach(t=>{
+      ['#','Analyst','Score','Accuracy','Time'].forEach(t=>{
         const th = document.createElement('th'); th.textContent = t; hr.appendChild(th);
       });
       thead.appendChild(hr); table.appendChild(thead);
@@ -1278,14 +1260,13 @@ function renderLeaderboard(){
         const c1 = document.createElement('td'); c1.className='rank'; c1.textContent = en.rank;
         const c2 = document.createElement('td');
         c2.textContent = en.name + ((participant && en.sessionId === participant.sessionId) ? '  (you)' : '');
-        const c3 = document.createElement('td'); c3.textContent = en.team || '\u2014';
         const c4 = document.createElement('td'); c4.className='num'; c4.textContent = en.score + '/' + en.total;
         const c5 = document.createElement('td');
         const bar = el('div','bar'); const fill = document.createElement('span');
         fill.style.width = Math.max(2, en.percent) + '%'; bar.appendChild(fill);
         c5.appendChild(bar);
         const c6 = document.createElement('td'); c6.className='num'; c6.textContent = fmtMinutes(en.minutes);
-        [c1,c2,c3,c4,c5,c6].forEach(c=>tr.appendChild(c));
+        [c1,c2,c4,c5,c6].forEach(c=>tr.appendChild(c));
         tb.appendChild(tr);
       });
       table.appendChild(tb);
