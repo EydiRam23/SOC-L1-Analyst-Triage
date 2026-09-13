@@ -171,6 +171,18 @@
 </div>
 
 <script>
+/* ==========================================================================
+   CONFIG — edit these two values, nothing else.
+   --------------------------------------------------------------------------
+   SUBMIT_ENDPOINT : paste the Google Apps Script web app URL here (see
+                     SETUP_scoreboard.md). Leave it as '' to run the page in
+                     offline mode: participants still see their own score and
+                     can download a report, but nothing is sent to you.
+   SHOW_LEADERBOARD: set to false to hide the public board entirely.
+   ========================================================================== */
+const SUBMIT_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxHRuVeyxLtCj6Lwrk8rLLFBBtSKKf1jsfc1KtcSitWMreTYFotwdbXiKp3whcb2I4/exec';
+const SHOW_LEADERBOARD = true;
+
 const SCENARIOS = [
 {
   id:'ALT-2026-0001', title:'Failed Windows Logon',
@@ -532,18 +544,6 @@ Additional requests from same source: 87 similar payloads over 3 minutes, all Bl
   answer:{verdict:'True Positive', escalate:false, rationale:'This is a genuine, real attack attempt \u2014 the fact that all 87 payloads were blocked with no 200 response means it was fully mitigated, not that it wasn\u2019t real. Log as a blocked exploitation attempt; no incident escalation is needed unless a bypass is later found. Forward to the application owner as a code-hardening finding and watchlist the source IP.'}
 }
 ];
-
-/* ==========================================================================
-   CONFIG — edit these two values, nothing else.
-   --------------------------------------------------------------------------
-   SUBMIT_ENDPOINT : paste the Google Apps Script web app URL here (see
-                     SETUP_scoreboard.md). Leave it as '' to run the page in
-                     offline mode: participants still see their own score and
-                     can download a report, but nothing is sent to you.
-   SHOW_LEADERBOARD: set to false to hide the public board entirely.
-   ========================================================================== */
-const SUBMIT_ENDPOINT = '';
-const SHOW_LEADERBOARD = true;
 
 const VERDICTS = ['False Positive','Benign Positive','True Positive','Inconclusive'];
 const responses = {};
