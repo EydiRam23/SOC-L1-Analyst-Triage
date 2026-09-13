@@ -1011,20 +1011,36 @@ async function submitResults(){
   if(!SUBMIT_ENDPOINT || !participant) return;
   submitState = {status:'sending', message:'Sending your results\u2026'};
   renderSummary();
+
+  const body = JSON.stringify(buildPayload());
+  // text/plain keeps this a "simple" request, so the browser skips the CORS
+  // preflight that Apps Script web apps cannot answer.
+  const opts = {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body};
+
   try{
-    const res = await fetch(SUBMIT_ENDPOINT, {
-      method:'POST',
-      // text/plain keeps this a "simple" request, so the browser skips the
-      // CORS preflight that Apps Script web apps cannot answer.
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify(buildPayload())
-    });
+    const res = await fetch(SUBMIT_ENDPOINT, opts);
     if(!res.ok) throw new Error('HTTP ' + res.status);
+    let data = null;
+    try { data = await res.json(); } catch(e){ /* non-JSON response */ }
+    if(data && data.ok === false) throw new Error(data.error || 'rejected by scoreboard');
     submitState = {status:'sent', message:'Results submitted. Your session ID is ' + participant.sessionId + ' \u2014 quote it if you need your score looked up.'};
     persist();
     if(SHOW_LEADERBOARD){ board = {status:'idle', data:null, error:''}; }
+    renderSummary();
+    return;
   } catch(err){
-    submitState = {status:'error', message:'Could not send results (' + err.message + '). Download your report and send it to the training administrator instead.'};
+    console.warn('Scoreboard submit failed, retrying without CORS:', err);
+  }
+
+  // Fallback: fire-and-forget. The request still reaches Apps Script, the
+  // browser just will not let us read the reply.
+  try{
+    await fetch(SUBMIT_ENDPOINT, Object.assign({mode:'no-cors'}, opts));
+    submitState = {status:'sent', message:'Results sent (delivery not confirmed by the browser). Your session ID is ' + participant.sessionId + ' \u2014 check with the training administrator if your score does not appear.'};
+    persist();
+    if(SHOW_LEADERBOARD){ board = {status:'idle', data:null, error:''}; }
+  } catch(err2){
+    submitState = {status:'error', message:'Could not send results (' + err2.message + '). Download your report and send it to the training administrator instead.'};
   }
   renderSummary();
 }
