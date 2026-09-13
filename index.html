@@ -957,7 +957,8 @@ function renderSummary(){
   state.id = 'submitState';
   if(submitState.message){
     state.textContent = submitState.message;
-    state.classList.add(submitState.status === 'sent' ? 'ok' : (submitState.status === 'error' ? 'bad' : ''));
+    const cls = submitState.status === 'sent' ? 'ok' : (submitState.status === 'error' ? 'bad' : '');
+    if(cls) state.classList.add(cls);
   } else if(SUBMIT_ENDPOINT){
     state.style.color = 'var(--muted)';
     state.textContent = 'Submitting sends your name, ID, session ID and score to the training administrator.';
@@ -1007,10 +1008,10 @@ function buildPayload(){
 
 async function submitResults(){
   if(!SUBMIT_ENDPOINT || !participant) return;
-  submitState = {status:'sending', message:'Sending your results\u2026'};
-  renderSummary();
-
   const body = JSON.stringify(buildPayload());
+  submitState = {status:'sending', message:'Sending your results\u2026'};
+  try { renderSummary(); } catch(e){ console.warn('render during submit failed', e); }
+
   // text/plain keeps this a "simple" request, so the browser skips the CORS
   // preflight that Apps Script web apps cannot answer.
   const opts = {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body};
