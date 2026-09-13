@@ -171,8 +171,6 @@
 </div>
 
 <script>
-const SUBMIT_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxHRuVeyxLtCj6Lwrk8rLLFBBtSKKf1jsfc1KtcSitWMreTYFotwdbXiKp3whcb2I4/exec';
-const SHOW_LEADERBOARD = true;
 const SCENARIOS = [
 {
   id:'ALT-2026-0001', title:'Failed Windows Logon',
@@ -550,7 +548,7 @@ const SHOW_LEADERBOARD = true;
 const VERDICTS = ['False Positive','Benign Positive','True Positive','Inconclusive'];
 const responses = {};
 let idx = 0;
-let participant = null;   // {sessionId, name, email, team, displayName, listPublicly, startedAt}
+let participant = null;   // {sessionId, name, email, listPublicly, startedAt}
 let submitState = {status:'idle', message:''};
 let board = {status:'idle', data:null, error:''};  // public leaderboard cache
 let cameFrom = 'register';                          // where "Back" returns to
@@ -979,8 +977,6 @@ function buildPayload(){
     sessionId: participant.sessionId,
     name: participant.name,
     email: participant.email || '',
-    team: '',
-    displayName: participant.displayName || participant.name,
     listPublicly: !!participant.listPublicly,
     startedAt: participant.startedAt,
     finishedAt: finishedAt,
@@ -1161,7 +1157,6 @@ function beginSession(){
     sessionId: makeSessionId(),
     name: name,
     email: email,
-    displayName: name,
     listPublicly: pubNode ? pubNode.checked : false,
     startedAt: new Date().toISOString()
   };
