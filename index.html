@@ -188,6 +188,10 @@
 const SUBMIT_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxHRuVeyxLtCj6Lwrk8rLLFBBtSKKf1jsfc1KtcSitWMreTYFotwdbXiKp3whcb2I4/exec';
 const SHOW_LEADERBOARD = true;
 
+/* A case appears in "most-missed" only once at least this many analysts have
+   scored it, so one unlucky attempt cannot make a case look hard. */
+const MISSED_MIN_ATTEMPTS = 3;
+
 const SCENARIOS = [
 {
   id:'ALT-2026-0001', title:'Failed Windows Logon',
@@ -1446,8 +1450,11 @@ function renderLeaderboard(){
       panel.appendChild(foot);
     }
 
-    // Which cases the group gets wrong most often
-    const cs = (d.caseStats || []).filter(c=>c.attempts > 0).slice(0,6);
+    // Which cases the group gets wrong most often. Cases nobody has missed are
+    // not "most-missed", and a single attempt is not evidence of difficulty.
+    const cs = (d.caseStats || [])
+      .filter(c => c.attempts >= MISSED_MIN_ATTEMPTS && c.percent < 100)
+      .slice(0,6);
     if(cs.length){
       const h2 = el('h2'); h2.style.marginTop = '24px';
       h2.textContent = 'MOST-MISSED CASES';
@@ -1455,7 +1462,7 @@ function renderLeaderboard(){
       const t2 = el('table','lb');
       const th2 = document.createElement('thead');
       const hr2 = document.createElement('tr');
-      ['Alert','Case','Correct','Attempts'].forEach(t=>{
+      ['Alert','Case','Correct rate','Scored by'].forEach(t=>{
         const th = document.createElement('th'); th.textContent = t; hr2.appendChild(th);
       });
       th2.appendChild(hr2); t2.appendChild(th2);
@@ -1477,6 +1484,11 @@ function renderLeaderboard(){
       });
       t2.appendChild(tb2);
       panel.appendChild(t2);
+
+      const foot2 = el('p','lb-foot');
+      foot2.textContent = 'Cases every analyst got right are not listed. A case appears once at least '
+        + MISSED_MIN_ATTEMPTS + ' analysts have scored it.';
+      panel.appendChild(foot2);
     }
   }
 
