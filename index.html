@@ -547,6 +547,75 @@ Timestamp: 2026-08-16 05:12:47 UTC
 Additional requests from same source: 87 similar payloads over 3 minutes, all Blocked (403)`],
   checklist:['Did the WAF block every request, or did any return 200 (a bypass)?','Is the source IP a known scanner/research range?','Does this endpoint build SQL from user input without parameterization \u2014 a code finding regardless of WAF outcome?','Did the source probe other endpoints?','Are other source IPs sending similar payloads (broad scan vs. targeted)?','Is this IP in any threat intel feed?'],
   answer:{verdict:'True Positive', escalate:false, rationale:'This is a genuine, real attack attempt \u2014 the fact that all 87 payloads were blocked with no 200 response means it was fully mitigated, not that it wasn\u2019t real. Log as a blocked exploitation attempt; no incident escalation is needed unless a bypass is later found. Forward to the application owner as a code-hardening finding and watchlist the source IP.'}
+},
+{
+  id:'ALT-2026-0023', title:'Encoded PowerShell on SOAR Integration Host',
+  meta:{Ticket:'INC-2026-0023', Source:'Google SecOps (Chronicle)', Rule:'Suspicious Encoded PowerShell', Severity:'High', Priority:'P2', Status:'Open', Asset:'SOAR-INTEG-01', User:'svc-soar', MITRE:'T1059.001'},
+  logs:[`udm.metadata.event_type: GENERIC_EVENT
+udm.metadata.log_type: SOAR_CASE_SYNC
+udm.metadata.event_timestamp: 2026-08-20T03:12:44Z
+
+udm.principal.hostname: SOAR-INTEG-01
+udm.principal.application: soar-case-connector
+udm.principal.user.userid: svc-soar
+
+udm.principal.process.command_line: (empty)
+udm.target.process.command_line: (empty)
+udm.target.process.file.full_path: (empty)
+
+udm.security_result.description:
+  "Case INC-2026-0002 note by analyst jdc: alert fired on
+   powershell.exe -ExecutionPolicy Bypass -EncodedCommand <BASE64_DATA>
+   observed on FIN-WKS-0231, escalated to L2"`,
+`Detection rule logic (excerpt):
+
+events:
+  $e.metadata.event_type != "PROCESS_LAUNCH"   // no type restriction
+  (
+    $e.principal.process.command_line = /-enc(odedcommand)?/ nocase or
+    $e.target.process.command_line = /-enc(odedcommand)?/ nocase or
+    $e.security_result.description = /-enc(odedcommand)?/ nocase
+  )
+
+Rule last modified: 2026-08-19 (description clause added to
+"catch alerts where the command line field is unpopulated")`],
+  checklist:['Did any process actually execute on SOAR-INTEG-01, or are all process fields empty?','Which UDM field did the rule match on?','Is SOAR-INTEG-01 an analyst endpoint, or the SOAR case-sync integration host?','Does the matched text belong to a different, already-triaged case?','Is there a corresponding Sysmon EventID 1 or EDR process event on this host?','When was the detection rule last modified, and what changed?'],
+  answer:{verdict:'False Positive', escalate:false, rationale:'No process executed. Every process field is empty, and the match came from security_result.description \u2014 the rule is reading the text of an analyst note synced back from case INC-2026-0002. The SIEM is detecting its own case data, so the described behaviour never happened on this host. Close as False Positive (detection scope error) and raise a rule-tuning ticket: restrict the description clause or exclude log_type SOAR_CASE_SYNC. Note the distinction from hunting queries \u2014 casting wide across fields is right when searching, wrong when a rule fires on it.'}
+},
+{
+  id:'ALT-2026-0024', title:'Logon Failures After NTP Outage',
+  meta:{Ticket:'INC-2026-0024', Source:'SIEM / Windows Security Log', Rule:'Multiple Windows Logon Failures', Severity:'Medium', Priority:'P3', Status:'Open', Asset:'BR-CEBU-FS01', User:'multiple', MITRE:'T1110 - Brute Force'},
+  logs:[`Alert summary:
+  147 x EventID 4625 from BR-CEBU-FS01 in 9 minutes
+  18 distinct accounts affected
+  Source: 10.44.7.0/24 (Cebu branch subnet)
+
+Sample event:
+  EventID: 4625
+  Account Name: a.mercado
+  Logon Type: 3
+  Status: 0xC000006D
+  Sub Status: 0xC0000133
+  Logon Process: Kerberos
+  Authentication Package: Kerberos
+
+Sub Status distribution across all 147 events:
+  0xC0000133 ("Clock skew too great")  ... 147
+  0xC000006A ("Bad password")          ... 0
+  0xC0000064 ("User name does not exist") ... 0`,
+`Correlated infrastructure event:
+
+  Source: Network monitoring
+  2026-08-21 01:52 - NTP service on BR-CEBU-FS01 stopped responding
+  2026-08-21 02:07 - Branch host clocks drifted >5 minutes from DC
+  2026-08-21 02:09 - First 4625 recorded
+  2026-08-21 02:18 - NTP restored, failures stopped
+
+Detection rule logic:
+  count(EventID = 4625) > 20 within 10m
+  (no Sub Status filter)`],
+  checklist:['What is the Sub Status on the failures, and what does it mean?','Are any failures 0xC000006A (bad password) or 0xC0000064 (no such user)?','Did the failure window match an infrastructure event?','Did any successful 4624 logons follow from an unexpected source?','Does the detection rule distinguish credential-guessing sub-statuses from other Kerberos errors?','Did the failures stop when the underlying issue was fixed?'],
+  answer:{verdict:'False Positive', escalate:false, rationale:'Not one failure is a credential-guessing sub-status. All 147 are 0xC0000133, clock skew \u2014 Kerberos refusing tickets because branch clocks drifted during an NTP outage, which begins and ends with that outage. No password was ever guessed, so the brute-force behaviour the rule describes did not occur. This is a rule defect, not benign admin activity: the rule counts raw 4625 volume with no Sub Status filter. Close as False Positive, raise a tuning ticket to scope the rule to 0xC000006A/0xC0000064, and pass the NTP failure to infrastructure.'}
 }
 ];
 
